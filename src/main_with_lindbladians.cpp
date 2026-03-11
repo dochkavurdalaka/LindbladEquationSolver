@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <array>
 #include <cmath>
 #include <iomanip>
 #include <cstring>
@@ -64,6 +65,7 @@ void calculate_f(double t, const double* v, double* result,
 
 std::vector<double> GetHCoef(MKL_Complex16* hamiltonian, int N) {
     std::vector<double> h_coeff;
+    h_coeff.reserve(N * N - 1);
 
     for (int j = 0; j < N; ++j) {
         for (int k = j + 1; k < N; ++k) {
@@ -98,6 +100,8 @@ std::vector<double> GetHCoef(MKL_Complex16* hamiltonian, int N) {
 
 std::vector<MKL_Complex16> GetLCoef(MKL_Complex16* lindbladian, int N) {
     std::vector<MKL_Complex16> l_coeff;
+    l_coeff.reserve(N * N - 1);
+
     for (int j = 0; j < N; ++j) {
         for (int k = j + 1; k < N; ++k) {
             MKL_Complex16 coeff = (lindbladian[j * N + k] + lindbladian[k * N + j]) / sqrt(2);
@@ -186,6 +190,21 @@ double check_hermitian_approx(const MKL_Complex16* M, int d) {
     return result;
 }
 
+double* GenerateVectorFunctorK(
+    int N, auto kossakovski_func,
+    const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor) {
+    int M = N * N - 1;
+    double* k_vector = (double*)mkl_malloc(M * sizeof(double), 64);
+    memset(k_vector, 0, M * sizeof(double));
+
+    for (const auto& el : f_tensor) {
+        MKL_Complex16 a = kossakovski_func(std::get<0>(el.first), std::get<1>(el.first));
+        k_vector[std::get<2>(el.first)] += -1. * (a * el.second).imag / N;
+    }
+
+    return k_vector;
+}
+
 int main() {
     // Параметры
     int N = 5;
@@ -195,30 +214,40 @@ int main() {
     MKL_Complex16* hamiltonian;
     GenerateTracelessHamiltonian(N, 2, hamiltonian);
 
-    // создаем линдбладиан и заполняем его нулями
-    MKL_Complex16* lindbladian;
-    GenerateLp(N, 0, lindbladian);
+    // создаем массив линдбладианов и заполняем его нулями
+    constexpr size_t lindbladian_cnt = 2;
+    std::array<MKL_Complex16*, lindbladian_cnt> lindbladians;
+    for (size_t i = 0; i < lindbladian_cnt; ++i) {
+        GenerateLp(N, i, lindbladians[i]);
+    }
 
     MKL_Complex16* rho;
     GenerateDensity(N, 2, rho);
 
     // вычисляем коэффициенты h
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
-    // вычисляем коэффициенты l
-    std::vector<MKL_Complex16> l_coeff = GetLCoef(lindbladian, N);
 
-    std::vector<MKL_Complex16> l_coeff_conjugate(l_coeff);
-    for (auto& elem : l_coeff_conjugate) {
-        elem = Conjugate(elem);
+    // вычисляем коэффициенты l
+    std::array<std::vector<MKL_Complex16>, lindbladian_cnt> l_coeffs;
+    for (size_t i = 0; i < lindbladian_cnt; ++i) {
+        l_coeffs[i] = GetLCoef(lindbladians[i], N);
     }
 
-    // Вычисляем матрицу Коссаковски
-    std::vector<MKL_Complex16> a(M * M);
-    for (int i = 0; i < M; ++i) {
-        for (int j = 0; j < M; ++j) {
-            a[i * M + j] = l_coeff[i] * l_coeff_conjugate[j];
+    std::array<std::vector<MKL_Complex16>, lindbladian_cnt> l_coeffs_conjugate(l_coeffs);
+
+    for (auto& vec : l_coeffs_conjugate) {
+        for (auto& elem : vec) {
+            elem = Conjugate(elem);
         }
     }
+
+    auto kossakovski_func = [&l_coeffs, &l_coeffs_conjugate, lindbladian_cnt](size_t i, size_t j) {
+        MKL_Complex16 result = {0., 0.};
+        for (size_t cnt = 0; cnt < lindbladian_cnt; ++cnt) {
+            result += l_coeffs[cnt][i] * l_coeffs_conjugate[cnt][j];
+        }
+        return result;
+    };
 
     auto f_tensor = GenerateTensorF(N);
     auto d_tensor = GenerateTensorD(N);
@@ -226,9 +255,9 @@ int main() {
 
     auto q_matrix = GenerateCOOMatrixQ(&f_tensor, h_coeff);
 
-    double* k_vector = GenerateVectorK(N, a, f_tensor);
+    double* k_vector = GenerateVectorFunctorK(N, kossakovski_func, f_tensor);
 
-    double* r_matrix = GenerateMatrixR(N, l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor);
+    double* r_matrix = GenerateMatrixRVec(N, l_coeffs, l_coeffs_conjugate, &f_tensor, &z_tensor);
 
     // print_double_matrix_rowmajor(r_matrix, M, "r_matrix");
 
@@ -281,7 +310,6 @@ int main() {
         cblas_daxpy(M, h / 6.0, v_sum, 1, v, 1);  // v = v + (h/6)*v_sum
 
         print_vector("v", t, v, M);
-
         t += h;
     }
 
@@ -303,7 +331,9 @@ int main() {
     //           << "\n";
 
     mkl_free(hamiltonian);
-    mkl_free(lindbladian);
+    for (auto& el : lindbladians) {
+        mkl_free(el);
+    }
     mkl_free(rho);
     mkl_free(workspace);
     mkl_free(k_vector);
