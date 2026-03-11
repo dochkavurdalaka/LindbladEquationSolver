@@ -22,10 +22,7 @@ MKL_Complex16 Trace(const MKL_Complex16* matrix, int n) {
     return tr;
 }
 
-MKL_Complex16 Conjugate(MKL_Complex16 number) {
-    number.imag = -number.imag;
-    return number;
-}
+
 
 // здесь и далее попробуем решить систему для константного H
 // тогда матрица Q тоже будет константной
@@ -544,7 +541,7 @@ void FillCommutator(std::vector<std::vector<MKL_Complex16*>>* commut, int N) {
 
 int main() {
     // Параметры
-    int N = 6;
+    int N = 9;
     int M = N * N - 1;
 
     std::vector<MKL_Complex16*> basis_array = CreateBasisArray(N);
@@ -707,12 +704,14 @@ int main() {
     }
 
     std::vector<std::pair<std::tuple<int, int>, double>> new_q_tensor;
-
+    double eps2 = 0;
     for (int n = 0; n < M; ++n) {
         for (int s = 0; s < M; ++s) {
             int q_index = s * M + n;
             if (abs(q_tensor_s[q_index]) > 1e-12) {
                 new_q_tensor.emplace_back(std::tuple(s, n), q_tensor_s[q_index]);
+            } else if (abs(q_tensor_s[q_index]) > 0) {
+                eps2 = std::max(abs(q_tensor_s[q_index]), 0.);
             }
         }
     }
@@ -722,11 +721,14 @@ int main() {
         std::cout << "false\n";
     }
 
+    double eps = 0;
     for (size_t i = 0; i < q_tensor.size(); ++i) {
+        eps = std::max(abs(q_tensor[i].second - new_q_tensor[i].second), eps);
         if ((q_tensor[i].first != new_q_tensor[i].first) and
             abs(q_tensor[i].second - new_q_tensor[i].second) > 1e-12) {
             std::cout << "false\n";
         }
     }
+    std::cout << eps << " " << eps2;;
     (void)new_q_tensor;
 }

@@ -149,6 +149,46 @@ bool Check(MKL_Complex16* first, MKL_Complex16* second, int N) {
     return true;
 }
 
+void AntiCommutator(const MKL_Complex16* F_m, const MKL_Complex16* F_n, MKL_Complex16* dummy_result,
+                    int N) {
+    MKL_Complex16 alpha = {1.0, 0.0}, beta = {0.0, 0.0};
+    cblas_zgemm(CblasRowMajor,  // Указывает, что матрицы хранятся построчно
+                                // (стандарт для C/C++)
+                CblasNoTrans,   // Операция для A: не транспонировать
+                CblasNoTrans,   // Операция для B: не транспонировать
+                N,              // Количество строк в матрице A (и C)
+                N,              // Количество столбцов в матрице B (и C)
+                N,              // Количество столбцов в A и строк в B
+                &alpha,         // Указатель на скаляр alpha
+                F_m,            // Матрица A
+                N,              // Ведущий размер (leading dimension) для A. Для RowMajor это
+                                // количество столбцов.
+                F_n,            // Матрица B
+                N,              // Ведущий размер для B.
+                &beta,          // Указатель на скаляр beta
+                dummy_result,   // Матрица C (результат)
+                N               // Ведущий размер для C.
+    );
+    beta = {1.0, 0.0};
+    cblas_zgemm(CblasRowMajor,  // Указывает, что матрицы хранятся построчно
+                                // (стандарт для C/C++)
+                CblasNoTrans,   // Операция для A: не транспонировать
+                CblasNoTrans,   // Операция для B: не транспонировать
+                N,              // Количество строк в матрице A (и C)
+                N,              // Количество столбцов в матрице B (и C)
+                N,              // Количество столбцов в A и строк в B
+                &alpha,         // Указатель на скаляр alpha
+                F_n,            // Матрица A
+                N,              // Ведущий размер (leading dimension) для A. Для RowMajor это
+                                // количество столбцов.
+                F_m,            // Матрица B
+                N,              // Ведущий размер для B.
+                &beta,          // Указатель на скаляр beta
+                dummy_result,   // Матрица C (результат)
+                N               // Ведущий размер для C.
+    );
+}
+
 void FillAntiCommutator(std::vector<std::vector<MKL_Complex16*>>* anticommut, int N) {
     auto& anticommutator = *anticommut;
 
@@ -489,7 +529,7 @@ void FillAntiCommutator(std::vector<std::vector<MKL_Complex16*>>* anticommut, in
 
 int main() {
     // Параметры
-    int N = 8;
+    int N = 9;
     int M = N * N - 1;
 
     std::vector<MKL_Complex16*> basis_array = CreateBasisArray(N);
@@ -499,6 +539,17 @@ int main() {
         anticommutator[m].resize(M);
         for (int n = 0; n < M; ++n) {
             anticommutator[m][n] = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+        }
+    }
+
+    std::vector<std::vector<MKL_Complex16*>> new_anticommutator(M);
+    for (int m = 0; m < M; ++m) {
+        new_anticommutator[m].resize(M);
+        for (int n = 0; n < M; ++n) {
+            anticommutator[m][n] = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+            new_anticommutator[m][n] =
+                (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+            AntiCommutator(basis_array[m], basis_array[n], new_anticommutator[m][n], N);
         }
     }
 
@@ -889,7 +940,7 @@ int main() {
                             basis_array[s],  // Матрица A
                             N,  // Ведущий размер (leading dimension) для A. Для RowMajor
                                 // это количество столбцов.
-                            anticommutator[m][n],  // Матрица B
+                            new_anticommutator[m][n],  // Матрица B
                             N,                     // Ведущий размер для B.
                             &beta,                 // Указатель на скаляр beta
                             end_result,            // Матрица C (результат)
@@ -909,11 +960,15 @@ int main() {
     if (arr.size() != new_arr.size()) {
         std::cout << "false\n";
     }
+
+    double eps = 0;
     for (size_t i = 0; i < arr.size(); ++i) {
+        eps = std::max(abs(arr[i].second - new_arr[i].second), eps);
         if ((arr[i].first != new_arr[i].first) or abs(arr[i].second - new_arr[i].second) > 1e-12) {
             std::cout << "false\n";
         }
     }
+    std::cout << eps;
 
     // print_matrix_rowmajor(commutator[2][13], N, "one");
     // print_matrix_rowmajor(new_commutator[2][13], N, "two");

@@ -22,11 +22,6 @@ MKL_Complex16 Trace(const MKL_Complex16* matrix, int n) {
     return tr;
 }
 
-MKL_Complex16 Conjugate(MKL_Complex16 number) {
-    number.imag = -number.imag;
-    return number;
-}
-
 // здесь и далее попробуем решить систему для константного H
 // тогда матрица Q тоже будет константной
 
@@ -39,12 +34,15 @@ void print_vector(const char* name, double t, const double* v, int M) {
     std::cout << "]" << std::endl;
 }
 
-void Check(double* first, double* second, int N) {
+double Check(double* first, double* second, int N) {
+    double eps = 0.;
     for (int i = 0; i < N; ++i) {
         if (abs(first[i] - second[i]) > 1e-4) {
             std::cout << i << "\n";
         }
+        eps = std::max(abs(first[i] - second[i]), eps);
     }
+    return eps;
 }
 
 std::vector<double> GetHCoef(MKL_Complex16* hamiltonian, int N) {
@@ -119,21 +117,10 @@ std::vector<MKL_Complex16> GetLCoef(MKL_Complex16* lindbladian, int N) {
     return l_coeff;
 }
 
-std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> DoubleToComplexTensor(
-    const std::vector<std::pair<std::tuple<int, int, int>, double>>& tensor_dbl) {
-    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> tensor_cmpl(tensor_dbl.size());
-
-    for (size_t i = 0; i < tensor_dbl.size(); ++i) {
-        tensor_cmpl[i].first = tensor_dbl[i].first;
-        tensor_cmpl[i].second = {tensor_dbl[i].second, 0};
-    }
-
-    return tensor_cmpl;
-}
 
 int main() {
     // Параметры
-    int N = 7;
+    int N = 9;
     int M = N * N - 1;
 
     // Cоздаем гамильтониан
@@ -202,7 +189,7 @@ int main() {
         k_tensor_tst[std::get<2>(el.first)] += -1. * (a[std::get<0>(el.first) * M + std::get<1>(el.first)] * el.second).imag / N;
     }
 
-    Check(k_tensor, k_tensor_tst, M);
+    std::cout << Check(k_tensor, k_tensor_tst, M) << std::endl;
 
 
     // print_double_matrix_rowmajor(r_tensor, M, "AAA");

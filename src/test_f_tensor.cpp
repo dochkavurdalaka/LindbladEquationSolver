@@ -29,19 +29,76 @@ MKL_Complex16 Conjugate(MKL_Complex16 number) {
 }
 
 
-std::vector<MKL_Complex16*> CreateBasisArray(int N) {
+
+
+bool Check(MKL_Complex16* first, MKL_Complex16* second, int N) {
+    for (int i = 0; i < N * N; ++i) {
+        if (abs(first[i].real - second[i].real) > 1e-4 or
+            abs(first[i].imag - second[i].imag) > 1e-4) {
+            return false;
+        }
+    }
+    return true;
+}
+
+size_t Mapping(int i, int j, int N) {
+    return i * (N - 1) - (i * (i - 1)) / 2 + j - i - 1;
+}
+
+void Commutator(const MKL_Complex16 *F_m, const MKL_Complex16 *F_n, MKL_Complex16 *dummy_result,
+                int N) {
+    MKL_Complex16 alpha = {1.0, 0.0}, beta = {0.0, 0.0};
+    cblas_zgemm(CblasRowMajor,  // Указывает, что матрицы хранятся построчно
+                                // (стандарт для C/C++)
+                CblasNoTrans,   // Операция для A: не транспонировать
+                CblasNoTrans,   // Операция для B: не транспонировать
+                N,              // Количество строк в матрице A (и C)
+                N,              // Количество столбцов в матрице B (и C)
+                N,              // Количество столбцов в A и строк в B
+                &alpha,         // Указатель на скаляр alpha
+                F_m,            // Матрица A
+                N,              // Ведущий размер (leading dimension) для A. Для RowMajor это
+                                // количество столбцов.
+                F_n,            // Матрица B
+                N,              // Ведущий размер для B.
+                &beta,          // Указатель на скаляр beta
+                dummy_result,   // Матрица C (результат)
+                N               // Ведущий размер для C.
+    );
+    alpha = {-1.0, 0.0};
+    beta = {1.0, 0.0};
+    cblas_zgemm(CblasRowMajor,  // Указывает, что матрицы хранятся построчно
+                                // (стандарт для C/C++)
+                CblasNoTrans,   // Операция для A: не транспонировать
+                CblasNoTrans,   // Операция для B: не транспонировать
+                N,              // Количество строк в матрице A (и C)
+                N,              // Количество столбцов в матрице B (и C)
+                N,              // Количество столбцов в A и строк в B
+                &alpha,         // Указатель на скаляр alpha
+                F_n,            // Матрица A
+                N,              // Ведущий размер (leading dimension) для A. Для RowMajor это
+                                // количество столбцов.
+                F_m,            // Матрица B
+                N,              // Ведущий размер для B.
+                &beta,          // Указатель на скаляр beta
+                dummy_result,   // Матрица C (результат)
+                N               // Ведущий размер для C.
+    );
+}
+
+std::vector<MKL_Complex16 *> CreateBasisArray(int N) {
     // 2. В цикле выделяем память для каждой матрицы и добавляем указатель в
     // вектор
-    std::vector<MKL_Complex16*> basis_array;
+    std::vector<MKL_Complex16 *> basis_array;
     for (int j = 0; j < N; ++j) {
         for (int k = j + 1; k < N; ++k) {
-            MKL_Complex16* new_matrix =
-                (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+            MKL_Complex16 *new_matrix =
+                (MKL_Complex16 *)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
             memset(new_matrix, 0, N * N * sizeof(MKL_Complex16));
             if (new_matrix == NULL) {
                 std::cerr << "Ошибка выделения памяти для матрицы";
                 // Освобождаем все, что успели выделить
-                for (MKL_Complex16* mat : basis_array) {
+                for (MKL_Complex16 *mat : basis_array) {
                     mkl_free(mat);
                 }
                 // return 1;
@@ -61,13 +118,13 @@ std::vector<MKL_Complex16*> CreateBasisArray(int N) {
 
     for (int j = 0; j < N; ++j) {
         for (int k = j + 1; k < N; ++k) {
-            MKL_Complex16* new_matrix =
-                (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+            MKL_Complex16 *new_matrix =
+                (MKL_Complex16 *)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
             memset(new_matrix, 0, N * N * sizeof(MKL_Complex16));
             if (new_matrix == NULL) {
                 std::cerr << "Ошибка выделения памяти для матрицы";
                 // Освобождаем все, что успели выделить
-                for (MKL_Complex16* mat : basis_array) {
+                for (MKL_Complex16 *mat : basis_array) {
                     mkl_free(mat);
                 }
                 // return 1;
@@ -86,12 +143,12 @@ std::vector<MKL_Complex16*> CreateBasisArray(int N) {
     }
 
     for (int l = 0; l < N - 1; ++l) {
-        MKL_Complex16* new_matrix = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+        MKL_Complex16 *new_matrix = (MKL_Complex16 *)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
         memset(new_matrix, 0, N * N * sizeof(MKL_Complex16));
         if (new_matrix == NULL) {
             std::cerr << "Ошибка выделения памяти для матрицы";
             // Освобождаем все, что успели выделить
-            for (MKL_Complex16* mat : basis_array) {
+            for (MKL_Complex16 *mat : basis_array) {
                 mkl_free(mat);
             }
             // return 1;
@@ -111,20 +168,6 @@ std::vector<MKL_Complex16*> CreateBasisArray(int N) {
     return basis_array;
 }
 
-
-bool Check(MKL_Complex16* first, MKL_Complex16* second, int N) {
-    for (int i = 0; i < N * N; ++i) {
-        if (abs(first[i].real - second[i].real) > 1e-4 or
-            abs(first[i].imag - second[i].imag) > 1e-4) {
-            return false;
-        }
-    }
-    return true;
-}
-
-size_t Mapping(int i, int j, int N) {
-    return i * (N - 1) - (i * (i - 1)) / 2 + j - i - 1;
-}
 
 // функция, которая раскладывает (e_{i}e_{i}^T - e_{j}e_{j}^T) по диагональному базису D_l
 std::vector<std::pair<int, double>> GetDecomposeD_m(int i, int j, int) {
@@ -411,10 +454,19 @@ void FillCommutator(std::vector<std::vector<MKL_Complex16*>>* commut, int N) {
 
 int main() {
     // Параметры
-    int N = 6;
+    int N = 9;
     int M = N * N - 1;
 
     std::vector<MKL_Complex16*> basis_array = CreateBasisArray(N);
+
+    std::vector<std::vector<MKL_Complex16 *>> new_commutator(M);
+    for (int m = 0; m < M; ++m) {
+        new_commutator[m].resize(M);
+        for (int n = 0; n < M; ++n) {
+            new_commutator[m][n] = (MKL_Complex16 *)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+            Commutator(basis_array[m], basis_array[n], new_commutator[m][n], N);
+        }
+    }
 
     std::vector<std::vector<MKL_Complex16*>> commutator(M);
     for (int m = 0; m < M; ++m) {
@@ -747,7 +799,7 @@ int main() {
                             basis_array[s],  // Матрица A
                             N,  // Ведущий размер (leading dimension) для A. Для RowMajor
                                 // это количество столбцов.
-                            commutator[m][n],  // Матрица B
+                            new_commutator[m][n],  // Матрица B
                             N,                 // Ведущий размер для B.
                             &beta,             // Указатель на скаляр beta
                             end_result,        // Матрица C (результат)
@@ -769,11 +821,15 @@ int main() {
     if (arr.size() != new_arr.size()) {
         std::cout << "false\n";
     }
+    double eps = 0;
     for (size_t i = 0; i < arr.size(); ++i) {
+        eps = std::max(abs(arr[i].second - new_arr[i].second), eps);
         if ((arr[i].first != new_arr[i].first) or abs(arr[i].second - new_arr[i].second) > 1e-12) {
             std::cout << "false\n";
         }
     }
+
+    std::cout << eps;
 
     // print_matrix_rowmajor(commutator[2][13], N, "one");
     // print_matrix_rowmajor(new_commutator[2][13], N, "two");
