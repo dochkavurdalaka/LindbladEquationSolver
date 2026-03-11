@@ -54,3 +54,16 @@ MKL_Complex16 operator/(const MKL_Complex16& a, double b) {
 bool operator!=(const MKL_Complex16& a, const MKL_Complex16& b) {
     return not((a.real == b.real) and (a.imag == b.imag));
 }
+
+bool operator==(const MKL_Complex16& obj, double val) {
+    return (obj.real == val and obj.imag == 0.);
+}
+
+bool operator!=(const MKL_Complex16& obj, double val) {
+    return obj.real != val or obj.imag != 0.;
+}
+
+MKL_Complex16 Conjugate(MKL_Complex16 number) {
+    number.imag = -number.imag;
+    return number;
+}
