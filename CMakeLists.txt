@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Определяем список программ
-set(PROGRAMS hardcore original main test_commutator test_f_tensor test_anticommutator test_d_tensor test_q_tensor q_tensor_experiments test_r_tensor test_k_tensor)
+set(PROGRAMS hardcore original main main_dimer_test main_dimer main_with_lindbladians main_RK_control test_commutator test_f_tensor test_anticommutator test_d_tensor test_q_tensor q_tensor_experiments test_r_tensor test_k_tensor)
 
 # Добавляем путь к нашим модулям CMake
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
