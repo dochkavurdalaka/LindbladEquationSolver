@@ -25,7 +25,7 @@ double Check(double* first, double* second, int N) {
 
 int main() {
     // Параметры
-    int N = 9;
+    int N = 12;
     int M = N * N - 1;
 
     // Cоздаем линдбладиан
@@ -44,15 +44,7 @@ int main() {
         elem = Conjugate(elem);
     }
 
-    // Вычисляем матрицу Коссаковски
-    std::vector<MKL_Complex16> a(M * M);
-    for (int i = 0; i < M; ++i) {
-        for (int j = 0; j < M; ++j) {
-            a[i * M + j] = l_coeff[i] * l_coeff_conjugate[j];
-        }
-    }
-
-    auto f_tensor = GenerateTensorF<2>(N);
+    auto f_tensor = GenerateTensorF<0>(N);
 
     double* k_tensor = (double*)mkl_malloc(M * sizeof(double), 64);
     memset(k_tensor, 0, M * sizeof(double));
@@ -69,9 +61,11 @@ int main() {
 
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < M; ++n) {
+            // Коэффициент матрицы Коссаковски с индексами m, n
+            MKL_Complex16 a_mn = l_coeff[m] * l_coeff_conjugate[n];
             for (int s = 0; s < M; ++s) {
                 int f_index = m * M * M + n * M + s;
-                k_tensor[s] += (a[m * M + n] * f_tensor_nonsparse[f_index]).imag;
+                k_tensor[s] += (a_mn * f_tensor_nonsparse[f_index]).imag;
             }
         }
     }
@@ -80,7 +74,12 @@ int main() {
         k_tensor[s] *= -1. / N;
     }
 
-    double* k_tensor_tst = GenerateVectorK(a, f_tensor, N);
+    // Функтор, вычисляющий матрицу Коссаковски
+    auto kossakovski_func = [&l_coeff, &l_coeff_conjugate](size_t i, size_t j) {
+        return l_coeff[i] * l_coeff_conjugate[j];
+    };
+
+    double* k_tensor_tst = GenerateVectorKWithFunctor(kossakovski_func, f_tensor, N);
 
     std::cout << Check(k_tensor, k_tensor_tst, M) << std::endl;
 
