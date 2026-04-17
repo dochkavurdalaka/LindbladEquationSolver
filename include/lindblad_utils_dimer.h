@@ -1,7 +1,6 @@
 #pragma once
 
 #include <vector>
-#include <algorithm>
 #include <cmath>
 #include <tuple>
 #include <unordered_map>
@@ -11,26 +10,94 @@
 #include "mkl.h"
 #include "lindblad_utils.h"
 
+template <class Functor>
 struct DimerModel {
     double J = -1.0;
     double U = 2.2;
     double E = -1.0;
     double A = -1.5;
-    std::function<double(double)> theta;
-    // вот здесь нужно будет поставить нормальный pi
-    double T = 2 * std::numbers::pi;
+    Functor theta;
+
     double gamma = 0.1;
     int N;
+    explicit DimerModel(Functor f, int N) : theta(std::move(f)), N(N) {
+    }
+
+    std::vector<double> GetBaseHCoefDimer(double t) {
+        std::vector<double> h_coeff(N * N - 1, 0);
+
+        for (int n = 0; n + 1 < N; ++n) {
+            int index = Mapping(n, n + 1, N);
+            h_coeff[index] = -J * sqrt(2. * (n + 1) * (N - 1 - n));
+        }
+
+        std::vector<double> hamiltonian_diag(N, 0);
+        for (int n = 0; n < N; ++n) {
+            hamiltonian_diag[n] = (2.0 * U / (N - 1)) * (n * (n - 1) + (N - 1 - n) * (N - 2 - n));
+            hamiltonian_diag[n] += (E + A * theta(t)) * (N - 1 - 2 * n);
+        }
+
+        for (int l = 0; l < N - 1; ++l) {
+            double coeff = 0.;
+
+            for (int k = 0; k < l + 1; ++k) {
+                coeff += hamiltonian_diag[k] / sqrt((l + 1) * (l + 2));
+            }
+
+            coeff += -sqrt(l + 1) * hamiltonian_diag[l + 1] / sqrt(l + 2);
+
+            h_coeff[N * (N - 1) + l] = coeff;
+        }
+
+        return h_coeff;
+    }
+
+    void GetUpdateHCoefDimer(std::vector<double>* h, double t) {
+
+        std::fill(h->begin() + N * (N - 1), h->end(), 0);
+
+        auto& h_coeff = *h;
+
+        std::vector<double> hamiltonian_diag(N, 0);
+        for (int n = 0; n < N; ++n) {
+            hamiltonian_diag[n] = (2.0 * U / (N - 1)) * (n * (n - 1) + (N - 1 - n) * (N - 2 - n));
+            hamiltonian_diag[n] += (E + A * theta(t)) * (N - 1 - 2 * n);
+        }
+
+        for (int l = 0; l < N - 1; ++l) {
+            double coeff = 0.;
+
+            for (int k = 0; k < l + 1; ++k) {
+                coeff += hamiltonian_diag[k] / sqrt((l + 1) * (l + 2));
+            }
+
+            coeff += -sqrt(l + 1) * hamiltonian_diag[l + 1] / sqrt(l + 2);
+
+            h_coeff[N * (N - 1) + l] = coeff;
+        }
+    }
+
+    std::vector<MKL_Complex16> GetLCoefDimer() {
+        double mult_coeff = sqrt(gamma / (N - 1));
+        std::vector<MKL_Complex16> l_coeff(N * N - 1, {0, 0});
+        for (int n = 0; n + 1 < N; ++n) {
+            int index = Mapping(n, n + 1, N);
+            l_coeff[index].real = mult_coeff * sqrt(2. * (n + 1) * (N - 1 - n));
+        }
+        return l_coeff;
+    }
 };
 
-// Показать Линеву, tuple нужно скорее всего будет заменить на struct
+template <size_t sort_ind = 1>
 struct SparseQBuilder {
     SparseQBuilder(std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tensor,
                    const std::vector<double>& h_coeff, int N);
 
     void update_values(const std::vector<double>& h_coeff);
 
-    sparse_matrix_t get_matrix();
+    sparse_matrix_t get_matrix() {
+        return q_;
+    }
 
     ~SparseQBuilder() {
         if (q_) {
@@ -39,18 +106,7 @@ struct SparseQBuilder {
     }
 
 private:
-    // спросить у Линева про этот способ и можно ли так делать
-    // если true !=0, если false = 0
-    bool CheckNonZeroHCoeff(int index, int N) {
-        if (index < N * (N - 1) / 2) {
-            return check[index];
-        } else if (index >= N * (N - 1)) {
-            return true;
-        }
-        return false;
-    }
-
-    std::vector<char> check;
+    std::vector<char> check_non_zero_hcoeff_;
 
     int rows_;
     int cols_;
@@ -69,14 +125,20 @@ private:
     sparse_matrix_t q_;
 };
 
-SparseQBuilder::SparseQBuilder(std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tensor,
-                               const std::vector<double>& h_coeff, int N) {
+template <size_t sort_ind>
+SparseQBuilder<sort_ind>::SparseQBuilder(
+    std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tensor,
+    const std::vector<double>& h_coeff, int N) {
 
-    check.resize(N * (N - 1) / 2, false);
+    check_non_zero_hcoeff_.resize(N * N - 1, false);
     for (int n = 0; n + 1 < N; ++n) {
         int index = Mapping(n, n + 1, N);
         // если true элемент ненулевой
-        check[index] = true;
+        check_non_zero_hcoeff_[index] = true;
+    }
+
+    for (int index = N * (N - 1); index < N * N - 1; ++index) {
+        check_non_zero_hcoeff_[index] = true;
     }
 
     auto cmp = [](const std::pair<std::tuple<int, int, int>, double>& left,
@@ -87,7 +149,12 @@ SparseQBuilder::SparseQBuilder(std::vector<std::pair<std::tuple<int, int, int>, 
         return std::get<2>(left.first) < std::get<2>(right.first);
     };
 
-    std::sort(f_tensor->begin(), f_tensor->end(), cmp);
+        // сортировка f_tensor по второму и третьему индексу
+    if constexpr (sort_ind == 1) {
+        std::sort(f_tensor->begin(), f_tensor->end(), cmp);
+    } else if constexpr (sort_ind == 2) {
+        CountSortTensorSN(f_tensor, N);
+    }
 
     auto& f_tensor_sorted = *f_tensor;
 
@@ -102,25 +169,22 @@ SparseQBuilder::SparseQBuilder(std::vector<std::pair<std::tuple<int, int, int>, 
     row_ptr_.resize(rows_ + 1, 0);
     cols_ = N * N - 1;
 
-    int current_row = -1;
-    int current_col = -1;
+    int cur_row = -1;
+    int cur_col = -1;
     int current_contribution = -1;
 
-    for (size_t i = 0; i < f_tensor_sorted.size(); ++i) {
-        if (CheckNonZeroHCoeff(std::get<0>(f_tensor_sorted[i].first), N)) {
-            int row = std::get<2>(f_tensor_sorted[i].first);
-            int col = std::get<1>(f_tensor_sorted[i].first);
-
-            if (not(row == current_row and col == current_col)) {
+    for (const auto& [f_ind, value] : f_tensor_sorted) {
+        const auto& [m, col, row] = f_ind;
+        if (check_non_zero_hcoeff_[m]) {
+            if (not(col == cur_col and row == cur_row)) {
                 col_ind_.push_back(col);
                 ++row_ptr_[row + 1];
-                current_row = row;
-                current_col = col;
+                cur_row = row;
+                cur_col = col;
                 ++current_contribution;
             }
 
-            contributions_.push_back({current_contribution, std::get<0>(f_tensor_sorted[i].first),
-                                      f_tensor_sorted[i].second});
+            contributions_.push_back({current_contribution, m, value});
         }
     }
 
@@ -140,12 +204,8 @@ SparseQBuilder::SparseQBuilder(std::vector<std::pair<std::tuple<int, int, int>, 
     mkl_sparse_optimize(q_);  // вызываем только один раз!
 }
 
-sparse_matrix_t SparseQBuilder::get_matrix() {
-    return q_;
-}
-
-// в целях оптимизации нужно будет здесь добавить локальную аккумуляцию
-void SparseQBuilder::update_values(const std::vector<double>& h_coeff) {
+template <size_t sort_ind>
+void SparseQBuilder<sort_ind>::update_values(const std::vector<double>& h_coeff) {
 
     std::fill(values_.begin(), values_.end(), 0);
     for (auto [value_ind, h_ind, f_tensor_value] : contributions_) {
@@ -153,7 +213,7 @@ void SparseQBuilder::update_values(const std::vector<double>& h_coeff) {
     }
 }
 
-// Показать Линеву, tuple нужно скорее всего будет заменить на struct
+template <size_t sort_ind_f = 1, size_t sort_ind_z = 1>
 struct SparseRBuilder {
     SparseRBuilder(const std::vector<MKL_Complex16>& l_coeff,
                    const std::vector<MKL_Complex16>& l_coeff_conjugate,
@@ -182,20 +242,14 @@ private:
     sparse_matrix_t r_;
 };
 
-SparseRBuilder::SparseRBuilder(
+template <size_t sort_ind_f, size_t sort_ind_z>
+SparseRBuilder<sort_ind_f, sort_ind_z>::SparseRBuilder(
     const std::vector<MKL_Complex16>& l_coeff, const std::vector<MKL_Complex16>& l_coeff_conjugate,
     std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
     std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N) {
 
     auto& f_tensor = *f_tens;
     auto& z_tensor = *z_tens;
-
-    int M = N * N - 1;
-
-    std::vector<std::unordered_map<int, double>> r_sparse(M);
-    for (auto& m : r_sparse) {
-        m.reserve(N);
-    }
 
     // сортировка f_tensor по второму и третьему индексу
     auto cmp = []<typename T>(const std::pair<std::tuple<int, int, int>, T>& left,
@@ -206,77 +260,68 @@ SparseRBuilder::SparseRBuilder(
         return std::get<1>(left.first) < std::get<1>(right.first);
     };
 
-    std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    // сортировка f_tensor по второму и третьему индексу
+    if constexpr (sort_ind_f == 1) {
+        std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    } else if constexpr (sort_ind_f == 2) {
+        CountSortTensorNS(f_tens, N);
+    }
 
-    auto f_tensor_cmplx = DoubleToComplexTensor(f_tensor);
+    // сортировка z_tensor по второму и третьему индексу
+    if constexpr (sort_ind_z == 1) {
+        std::sort(z_tensor.begin(), z_tensor.end(), cmp);
+    } else if constexpr (sort_ind_z == 2) {
+        CountSortTensorNS(z_tens, N);
+    }
 
-    // double* r_tensor = (double*)mkl_malloc(M * M * sizeof(double), 64);
-    // memset(r_tensor, 0, M * M * sizeof(double));
-
-    std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>> elem;
     std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> f_tensor_ss;
-    int current_get_1 = -1;
-    int current_get_2 = -1;
+    int cur_n, cur_s;
+    cur_n = cur_s = -1;
 
-    for (size_t i = 0; i < f_tensor_cmplx.size(); ++i) {
+    for (size_t i = 0; i < f_tensor.size(); ++i) {
+        const auto& [f_ind, value] = f_tensor[i];
+        const auto& [m, n, s] = f_ind;
 
         // если l = 0, тогда l сопряженное тоже = 0
-        if (l_coeff_conjugate[std::get<0>(f_tensor_cmplx[i].first)] != 0) {
-
-            if (current_get_1 == std::get<1>(f_tensor_cmplx[i].first) and
-                current_get_2 == std::get<2>(f_tensor_cmplx[i].first)) {
-
-                f_tensor_ss.back().second[0] +=
-                    l_coeff_conjugate[std::get<0>(f_tensor_cmplx[i].first)] *
-                    f_tensor_cmplx[i].second;
-
-                f_tensor_ss.back().second[1] +=
-                    l_coeff[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second;
-
+        if (l_coeff_conjugate[m] != 0) {
+            if (cur_n == n and cur_s == s) {
+                f_tensor_ss.back().second[0] += l_coeff_conjugate[m] * value;
+                f_tensor_ss.back().second[1] += l_coeff[m] * value;
             } else {
-                elem = {std::tuple(std::get<1>(f_tensor_cmplx[i].first),
-                                   std::get<2>(f_tensor_cmplx[i].first)),
-                        {l_coeff_conjugate[std::get<0>(f_tensor_cmplx[i].first)] *
-                             f_tensor_cmplx[i].second,
-                         l_coeff[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second}};
-
-                f_tensor_ss.push_back(elem);
-
-                current_get_1 = std::get<1>(f_tensor_cmplx[i].first);
-                current_get_2 = std::get<2>(f_tensor_cmplx[i].first);
+                f_tensor_ss.emplace_back(
+                    std::tuple(n, s), std::array{l_coeff_conjugate[m] * value, l_coeff[m] * value});
+                cur_n = n;
+                cur_s = s;
             }
         }
     }
 
-    std::sort(z_tensor.begin(), z_tensor.end(), cmp);
-
-    current_get_1 = -1;
-    current_get_2 = -1;
+    cur_n = cur_s = -1;
 
     std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> z_tensor_ss;
 
     for (size_t i = 0; i < z_tensor.size(); ++i) {
-
+        const auto& [z_ind, value] = z_tensor[i];
+        const auto& [m, n, s] = z_ind;
         // если l = 0, тогда l сопряженное тоже = 0
-        if (l_coeff[std::get<0>(z_tensor[i].first)] != 0) {
-            if (current_get_1 == std::get<1>(z_tensor[i].first) and
-                current_get_2 == std::get<2>(z_tensor[i].first)) {
-                z_tensor_ss.back().second[0] +=
-                    l_coeff[std::get<0>(z_tensor[i].first)] * z_tensor[i].second;
-                z_tensor_ss.back().second[1] += l_coeff_conjugate[std::get<0>(z_tensor[i].first)] *
-                                                Conjugate(z_tensor[i].second);
+        if (l_coeff[m] != 0) {
+            if (cur_n == n and cur_s == s) {
+                z_tensor_ss.back().second[0] += l_coeff[m] * value;
+                z_tensor_ss.back().second[1] += l_coeff_conjugate[m] * Conjugate(value);
             } else {
-                elem = {std::tuple(std::get<1>(z_tensor[i].first), std::get<2>(z_tensor[i].first)),
-                        {l_coeff[std::get<0>(z_tensor[i].first)] * z_tensor[i].second,
-                         l_coeff_conjugate[std::get<0>(z_tensor[i].first)] *
-                             Conjugate(z_tensor[i].second)}};
-
-                z_tensor_ss.push_back(elem);
-
-                current_get_1 = std::get<1>(z_tensor[i].first);
-                current_get_2 = std::get<2>(z_tensor[i].first);
+                z_tensor_ss.emplace_back(
+                    std::tuple(n, s),
+                    std::array{l_coeff[m] * value, l_coeff_conjugate[m] * Conjugate(value)});
+                cur_n = n;
+                cur_s = s;
             }
         }
+    }
+
+    int M = N * N - 1;
+    std::vector<std::unordered_map<int, double>> r_sparse(M);
+    for (int i = 0; i < M; ++i) {
+        r_sparse[i].reserve(N);
     }
 
     // Добавляем страж-элемент для упрощения проверки границ в циклах while
@@ -315,8 +360,8 @@ SparseRBuilder::SparseRBuilder(
         start_f = end_f;
     }
 
-    int rows_ = M;
-    int cols_ = M;
+    rows_ = M;
+    cols_ = M;
 
     // Подсчет nnz
     size_t nnz = 0;
@@ -356,23 +401,3 @@ SparseRBuilder::SparseRBuilder(
 
     mkl_sparse_optimize(r_);  // вызываем только один раз!
 }
-
-double* GenerateVectorKWithFunctor(
-    int N, auto kossakovski_func,
-    const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor) {
-    int M = N * N - 1;
-    double* k_vector = (double*)mkl_malloc(M * sizeof(double), 64);
-    memset(k_vector, 0, M * sizeof(double));
-
-    for (const auto& el : f_tensor) {
-        MKL_Complex16 a = kossakovski_func(std::get<0>(el.first), std::get<1>(el.first));
-
-        // большая часть a у нас будут 0
-        if (a.real != 0 or a.imag != 0) {
-            k_vector[std::get<2>(el.first)] += -1. * (a * el.second).imag / N;
-        }
-    }
-
-    return k_vector;
-}
-

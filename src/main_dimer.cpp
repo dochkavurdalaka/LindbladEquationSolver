@@ -7,7 +7,7 @@
 #include <chrono>
 
 #include "mkl.h"
-#include "generate_matrices_v2.h"
+#include "generate_matrices.h"
 #include "mkl_complex16.h"
 #include "lindblad_utils.h"
 

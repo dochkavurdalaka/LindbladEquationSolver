@@ -1,67 +1,13 @@
 #pragma once
 
-#include <vector>
 #include <algorithm>
 #include <cmath>
-#include <tuple>
+#include <array>
+#include <cstring>
 #include "mkl.h"
 
-void CountSortTensor(std::vector<std::pair<std::tuple<int, int, int>, double>>* items, size_t N) {
-    auto& tensor = *items;
-
-    // Фаза 1: сортировка по s
-    std::vector<int> count(N * N - 1, 0);
-    for (const auto& item : tensor) {
-        count[std::get<2>(item.first)]++;
-    }
-
-    // Префиксные суммы для s
-    for (size_t i = 1; i < count.size(); i++) {
-        count[i] += count[i - 1];
-    }
-
-    std::vector<std::pair<std::tuple<int, int, int>, double>> temp_tensor(tensor.size());
-    // Распределение в обратном порядке для stable сортировки
-    for (int i = tensor.size() - 1; i >= 0; i--) {
-        const auto& item = tensor[i];
-        int pos = --count[std::get<2>(item.first)];
-        temp_tensor[pos] = tensor[i];
-    }
-
-    // Фаза 2: сортировка по n
-    std::fill(count.begin(), count.end(), 0);
-    for (const auto& item : temp_tensor) {
-        count[std::get<1>(item.first)]++;
-    }
-
-    for (size_t i = 1; i < count.size(); i++) {
-        count[i] += count[i - 1];
-    }
-
-    for (int i = temp_tensor.size() - 1; i >= 0; i--) {
-        const auto& item = temp_tensor[i];
-        int pos = --count[std::get<1>(item.first)];
-        tensor[pos] = temp_tensor[i];
-    }
-
-    // Фаза 3: сортировка по m
-    std::fill(count.begin(), count.end(), 0);
-    for (const auto& item : tensor) {
-        count[std::get<0>(item.first)]++;
-    }
-
-    for (size_t i = 1; i < count.size(); i++) {
-        count[i] += count[i - 1];
-    }
-
-    for (int i = temp_tensor.size() - 1; i >= 0; i--) {
-        const auto& item = tensor[i];
-        int pos = --count[std::get<0>(item.first)];
-        temp_tensor[pos] = item;
-    }
-    tensor = std::move(temp_tensor);
-}
-
+#include "mkl_complex16.h"
+#include "count_sorts.h"
 
 size_t Mapping(int i, int j, int N) {
     return i * (N - 1) - (i * (i - 1)) / 2 + j - i - 1;
@@ -86,10 +32,16 @@ std::vector<std::pair<int, double>> GetDecomposeD_m(int i, int j, int) {
     return result;
 }
 
+// sort_ind = 0 -  не сортируем тензор в конце работы функции
+// sort_ind = 1 -  сортируем тензор в конце работы функции qsort
+// sort_ind = 2 -  сортируем тензор в конце работы функции count sort
+template <size_t sort_ind = 1>
 std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N) {
     // 1 квадрант
     // i < l
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr;
+
+    // (N³ - 3N² + 2N) / 6 = C(N, 3) - столько здесь добавляется элементов
     for (int j_k = 1; j_k + 1 < N; ++j_k) {
         for (int i = 0; i < j_k; ++i) {
             for (int l = j_k + 1; l < N; ++l) {
@@ -115,6 +67,7 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N)
         }
     }
 
+    // (N³ - 3N² + 2N) / 3 = 2 * C(N, 3) - столько здесь добавляется элементов
     for (int i_k = 0; i_k + 1 < N; ++i_k) {
         for (int j = i_k + 1; j < N; ++j) {
             for (int l = i_k + 1; l < N; ++l) {
@@ -221,6 +174,8 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N)
         }
     }
 
+    //  2 * ((N³ + 3N² - 10N + 6) / 6) - столько здесь добавляется элементов
+    // слева домножается на 2, потому что здесь обрабатываются две диагонали
     for (int i_k = 0; i_k + 1 < N; ++i_k) {
         for (int j_l = i_k + 1; j_l < N; ++j_l) {
             size_t f_c = Mapping(i_k, j_l, N);
@@ -385,7 +340,12 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N)
         }
     }
 
-    std::sort(arr.begin(), arr.end());
+    if constexpr (sort_ind == 1) {
+        std::sort(arr.begin(), arr.end());
+    } else if constexpr (sort_ind == 2) {
+        CountSortTensor(&arr, N);
+    }
+
     return arr;
 }
 
@@ -414,6 +374,10 @@ std::vector<std::pair<int, double>> GetDecomposeD_p(int i, int j, int N) {
     return result;
 }
 
+// sort_ind = 0 -  не сортируем тензор в конце работы функции
+// sort_ind = 1 -  сортируем тензор в конце работы функции qsort
+// sort_ind = 2 -  сортируем тензор в конце работы функции count sort
+template <size_t sort_ind = 1>
 std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N) {
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr;
 
@@ -781,10 +745,15 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N)
         }
     }
 
-    std::sort(arr.begin(), arr.end());
+    if constexpr (sort_ind == 1) {
+        std::sort(arr.begin(), arr.end());
+    } else if constexpr (sort_ind == 2) {
+        CountSortTensor(&arr, N);
+    }
     return arr;
 }
 
+// принимает на вход две отсортированные последовательности f и d и merge их
 std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> GenerateTensorZ(
     const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor,
     const std::vector<std::pair<std::tuple<int, int, int>, double>>& d_tensor) {
@@ -822,122 +791,137 @@ std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> GenerateTensorZ
     return z_tensor;
 }
 
-sparse_matrix_t GenerateSparseMatrixQ(
-    const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor_sorted,
-    const std::vector<double>& h_coeff) {
+// пердполагается, что в эту функцию передается уже отсортированный тензор f
+// sparse_matrix_t GenerateSparseMatrixQ(
+//     const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor_sorted,
+//     const std::vector<double>& h_coeff) {
 
-    std::vector<double> values;
-    values.reserve(f_tensor_sorted.size());
-    std::vector<int> row_ind;
-    row_ind.reserve(f_tensor_sorted.size());
-    std::vector<int> col_ind;
-    col_ind.reserve(f_tensor_sorted.size());
+//     std::vector<double> values;
+//     values.reserve(f_tensor_sorted.size());
+//     std::vector<int> row_ind;
+//     row_ind.reserve(f_tensor_sorted.size());
+//     std::vector<int> col_ind;
+//     col_ind.reserve(f_tensor_sorted.size());
 
-    values.push_back(h_coeff[std::get<0>(f_tensor_sorted[0].first)] * f_tensor_sorted[0].second);
-    row_ind.push_back(std::get<2>(f_tensor_sorted[0].first));
-    col_ind.push_back(std::get<1>(f_tensor_sorted[0].first));
+//     values.push_back(h_coeff[std::get<0>(f_tensor_sorted[0].first)] * f_tensor_sorted[0].second);
+//     row_ind.push_back(std::get<2>(f_tensor_sorted[0].first));
+//     col_ind.push_back(std::get<1>(f_tensor_sorted[0].first));
 
-    for (size_t i = 1; i < f_tensor_sorted.size(); ++i) {
-        if (std::get<2>(f_tensor_sorted[i - 1].first) == std::get<2>(f_tensor_sorted[i].first) and
-            std::get<1>(f_tensor_sorted[i - 1].first) == std::get<1>(f_tensor_sorted[i].first)) {
-            values.back() +=
-                h_coeff[std::get<0>(f_tensor_sorted[i].first)] * f_tensor_sorted[i].second;
-        } else {
-            values.push_back(h_coeff[std::get<0>(f_tensor_sorted[i].first)] *
-                             f_tensor_sorted[i].second);
-            row_ind.push_back(std::get<2>(f_tensor_sorted[i].first));
-            col_ind.push_back(std::get<1>(f_tensor_sorted[i].first));
-        }
-    }
+//     for (size_t i = 1; i < f_tensor_sorted.size(); ++i) {
+//         if (std::get<2>(f_tensor_sorted[i - 1].first) == std::get<2>(f_tensor_sorted[i].first)
+//         and
+//             std::get<1>(f_tensor_sorted[i - 1].first) == std::get<1>(f_tensor_sorted[i].first)) {
+//             values.back() +=
+//                 h_coeff[std::get<0>(f_tensor_sorted[i].first)] * f_tensor_sorted[i].second;
+//         } else {
+//             values.push_back(h_coeff[std::get<0>(f_tensor_sorted[i].first)] *
+//                              f_tensor_sorted[i].second);
+//             row_ind.push_back(std::get<2>(f_tensor_sorted[i].first));
+//             col_ind.push_back(std::get<1>(f_tensor_sorted[i].first));
+//         }
+//     }
 
-    sparse_matrix_t q_coo;
+//     sparse_matrix_t q_coo;
 
-    int rows = static_cast<int>(h_coeff.size());
-    int cols = static_cast<int>(h_coeff.size());
+//     int rows = static_cast<int>(h_coeff.size());
+//     int cols = static_cast<int>(h_coeff.size());
 
-    mkl_sparse_d_create_coo(&q_coo, SPARSE_INDEX_BASE_ZERO, rows, cols, values.size(),
-                            row_ind.data(), col_ind.data(), values.data());
+//     mkl_sparse_d_create_coo(&q_coo, SPARSE_INDEX_BASE_ZERO, rows, cols, values.size(),
+//                             row_ind.data(), col_ind.data(), values.data());
 
-    sparse_matrix_t q_csr;
-    mkl_sparse_convert_csr(q_coo, SPARSE_OPERATION_NON_TRANSPOSE, &q_csr);
-    mkl_sparse_destroy(q_coo);
+//     sparse_matrix_t q_csr;
+//     mkl_sparse_convert_csr(q_coo, SPARSE_OPERATION_NON_TRANSPOSE, &q_csr);
+//     mkl_sparse_destroy(q_coo);
 
-    // Спросить у Линева про этот пункт
-    mkl_sparse_optimize(q_csr);
-    return q_csr;
-}
+//     // Спросить у Линева про этот пункт
+//     mkl_sparse_optimize(q_csr);
+//     return q_csr;
+// }
 
-std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> DoubleToComplexTensor(
-    const std::vector<std::pair<std::tuple<int, int, int>, double>>& tensor_dbl) {
-    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> tensor_cmpl(tensor_dbl.size());
-
-    for (size_t i = 0; i < tensor_dbl.size(); ++i) {
-        tensor_cmpl[i].first = tensor_dbl[i].first;
-        tensor_cmpl[i].second = {tensor_dbl[i].second, 0};
-    }
-
-    return tensor_cmpl;
-}
-
-double* GenerateVectorK(int N, const std::vector<MKL_Complex16>& a,
-                        const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor) {
+double* GenerateVectorK(const std::vector<MKL_Complex16>& a,
+                        const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor,
+                        int N) {
     int M = N * N - 1;
     double* k_vector = (double*)mkl_malloc(M * sizeof(double), 64);
     memset(k_vector, 0, M * sizeof(double));
-
-    for (const auto& el : f_tensor) {
-        k_vector[std::get<2>(el.first)] +=
-            -1. * (a[std::get<0>(el.first) * M + std::get<1>(el.first)] * el.second).imag / N;
+    for (const auto& [ind, value] : f_tensor) {
+        const auto& [m, n, s] = ind;
+        k_vector[s] += -1. * (a[m * M + n] * value).imag / N;
     }
 
     return k_vector;
 }
 
+double* GenerateVectorKWithFunctor(
+    auto kossakovski_func,
+    const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor, int N) {
+    int M = N * N - 1;
+    double* k_vector = (double*)mkl_malloc(M * sizeof(double), 64);
+    memset(k_vector, 0, M * sizeof(double));
+
+    for (const auto& [ind, value] : f_tensor) {
+        const auto& [m, n, s] = ind;
+
+        k_vector[s] += -1. * (kossakovski_func(m, n) * value).imag / N;
+    }
+
+    return k_vector;
+}
+
+// в этой функции ключевым условием для правильности работы является отсортированность тензора f по
+// возрастанию (s, n) sort_ind = 0 -  не сортируем тензор в начале работы функции sort_ind = 1 -
+// сортируем тензор в начале работы функции qsort sort_ind = 2 -  сортируем тензор в начале работы
+// функции count sort
+template <size_t sort_ind = 1>
 std::vector<std::pair<std::tuple<int, int>, double>> GenerateCOOMatrixQ(
     std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-    const std::vector<double>& h_coeff) {
+    const std::vector<double>& h_coeff, size_t N) {
     auto& f_tensor = *f_tens;
-    auto cmp = [](const std::pair<std::tuple<int, int, int>, double>& left,
-                  const std::pair<std::tuple<int, int, int>, double>& right) {
-        if (std::get<2>(left.first) == std::get<2>(right.first)) {
-            return std::get<1>(left.first) < std::get<1>(right.first);
-        }
-        return std::get<2>(left.first) < std::get<2>(right.first);
-    };
 
-    std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    if constexpr (sort_ind == 1) {
+        auto cmp = [](const std::pair<std::tuple<int, int, int>, double>& left,
+                      const std::pair<std::tuple<int, int, int>, double>& right) {
+            if (std::get<2>(left.first) == std::get<2>(right.first)) {
+                return std::get<1>(left.first) < std::get<1>(right.first);
+            }
+            return std::get<2>(left.first) < std::get<2>(right.first);
+        };
+        std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    } else if constexpr (sort_ind == 2) {
+        CountSortTensorSN(f_tens, N);
+    }
+
     std::vector<std::pair<std::tuple<int, int>, double>> q_matrix;
 
-    q_matrix.emplace_back(
-        std::tuple(std::get<2>(f_tensor[0].first), std::get<1>(f_tensor[0].first)),
-        h_coeff[std::get<0>(f_tensor[0].first)] * f_tensor[0].second);
+    int cur_n, cur_s;
+    cur_n = cur_s = -1;
 
-    for (size_t i = 1; i < f_tensor.size(); ++i) {
-        if (std::get<2>(f_tensor[i - 1].first) == std::get<2>(f_tensor[i].first) and
-            std::get<1>(f_tensor[i - 1].first) == std::get<1>(f_tensor[i].first)) {
-            q_matrix.back().second += h_coeff[std::get<0>(f_tensor[i].first)] * f_tensor[i].second;
+    for (const auto& [f_ind, value] : f_tensor) {
+        const auto& [m, n, s] = f_ind;
+        if (cur_n == n and cur_s == s) {
+            q_matrix.back().second += h_coeff[m] * value;
         } else {
-
-            q_matrix.emplace_back(
-                std::tuple(std::get<2>(f_tensor[i].first), std::get<1>(f_tensor[i].first)),
-                h_coeff[std::get<0>(f_tensor[i].first)] * f_tensor[i].second);
+            q_matrix.emplace_back(std::tuple(s, n), h_coeff[m] * value);
+            cur_n = n;
+            cur_s = s;
         }
     }
 
     return q_matrix;
 }
 
-double* GenerateMatrixR(int N, const std::vector<MKL_Complex16>& l_coeff,
+template <size_t sort_ind_f = 1, size_t sort_ind_z = 1>
+double* GenerateMatrixR(const std::vector<MKL_Complex16>& l_coeff,
                         const std::vector<MKL_Complex16>& l_coeff_conjugate,
                         std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-                        std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens) {
+                        std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens,
+                        size_t N) {
 
     auto& f_tensor = *f_tens;
     auto& z_tensor = *z_tens;
 
     int M = N * N - 1;
 
-    // сортировка f_tensor по второму и третьему индексу
     auto cmp = []<typename T>(const std::pair<std::tuple<int, int, int>, T>& left,
                               const std::pair<std::tuple<int, int, int>, T>& right) {
         if (std::get<1>(left.first) == std::get<1>(right.first)) {
@@ -946,61 +930,57 @@ double* GenerateMatrixR(int N, const std::vector<MKL_Complex16>& l_coeff,
         return std::get<1>(left.first) < std::get<1>(right.first);
     };
 
-    std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    // сортировка f_tensor по второму и третьему индексу
+    if constexpr (sort_ind_f == 1) {
+        std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    } else if constexpr (sort_ind_f == 2) {
+        CountSortTensorNS(f_tens, N);
+    }
 
-    auto f_tensor_cmplx = DoubleToComplexTensor(f_tensor);
-
-    std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>> elem = {
-        std::tuple(std::get<1>(f_tensor_cmplx[0].first), std::get<2>(f_tensor_cmplx[0].first)),
-        {l_coeff_conjugate[std::get<0>(f_tensor_cmplx[0].first)] * f_tensor_cmplx[0].second,
-         l_coeff[std::get<0>(f_tensor_cmplx[0].first)] * f_tensor_cmplx[0].second}};
+    // сортировка z_tensor по второму и третьему индексу
+    if constexpr (sort_ind_z == 1) {
+        std::sort(z_tensor.begin(), z_tensor.end(), cmp);
+    } else if constexpr (sort_ind_z == 2) {
+        CountSortTensorNS(z_tens, N);
+    }
 
     std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> f_tensor_ss;
+    f_tensor_ss.reserve(f_tensor.size());
+    int cur_n, cur_s;
+    cur_n = cur_s = -1;
 
-    for (size_t i = 1; i < f_tensor_cmplx.size(); ++i) {
-        if (std::get<1>(f_tensor_cmplx[i - 1].first) == std::get<1>(f_tensor_cmplx[i].first) and
-            std::get<2>(f_tensor_cmplx[i - 1].first) == std::get<2>(f_tensor_cmplx[i].first)) {
-            elem.second[0] +=
-                l_coeff_conjugate[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second;
-
-            elem.second[1] +=
-                l_coeff[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second;
+    for (size_t i = 0; i < f_tensor.size(); ++i) {
+        const auto& [f_ind, value] = f_tensor[i];
+        const auto& [m, n, s] = f_ind;
+        if (cur_n == n and cur_s == s) {
+            f_tensor_ss.back().second[0] += l_coeff_conjugate[m] * value;
+            f_tensor_ss.back().second[1] += l_coeff[m] * value;
         } else {
-            f_tensor_ss.push_back(elem);
-
-            elem = {
-                std::tuple(std::get<1>(f_tensor_cmplx[i].first),
-                           std::get<2>(f_tensor_cmplx[i].first)),
-                {l_coeff_conjugate[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second,
-                 l_coeff[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second}};
+            f_tensor_ss.emplace_back(std::tuple(n, s),
+                                     std::array{l_coeff_conjugate[m] * value, l_coeff[m] * value});
+            cur_n = n;
+            cur_s = s;
         }
     }
-    f_tensor_ss.push_back(elem);
-
-    std::sort(z_tensor.begin(), z_tensor.end(), cmp);
-
-    elem = {std::tuple(std::get<1>(z_tensor[0].first), std::get<2>(z_tensor[0].first)),
-            {l_coeff[std::get<0>(z_tensor[0].first)] * z_tensor[0].second,
-             l_coeff_conjugate[std::get<0>(z_tensor[0].first)] * Conjugate(z_tensor[0].second)}};
 
     std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> z_tensor_ss;
+    z_tensor_ss.reserve(z_tensor.size());
+    cur_n = cur_s = -1;
 
-    for (size_t i = 1; i < z_tensor.size(); ++i) {
-        if (std::get<1>(z_tensor[i - 1].first) == std::get<1>(z_tensor[i].first) and
-            std::get<2>(z_tensor[i - 1].first) == std::get<2>(z_tensor[i].first)) {
-            elem.second[0] += l_coeff[std::get<0>(z_tensor[i].first)] * z_tensor[i].second;
-            elem.second[1] +=
-                l_coeff_conjugate[std::get<0>(z_tensor[i].first)] * Conjugate(z_tensor[i].second);
+    for (size_t i = 0; i < z_tensor.size(); ++i) {
+        const auto& [z_ind, value] = z_tensor[i];
+        const auto& [m, n, s] = z_ind;
+        if (cur_n == n and cur_s == s) {
+            z_tensor_ss.back().second[0] += l_coeff[m] * value;
+            z_tensor_ss.back().second[1] += l_coeff_conjugate[m] * Conjugate(value);
         } else {
-            z_tensor_ss.push_back(elem);
-
-            elem = {std::tuple(std::get<1>(z_tensor[i].first), std::get<2>(z_tensor[i].first)),
-                    {l_coeff[std::get<0>(z_tensor[i].first)] * z_tensor[i].second,
-                     l_coeff_conjugate[std::get<0>(z_tensor[i].first)] *
-                         Conjugate(z_tensor[i].second)}};
+            z_tensor_ss.emplace_back(
+                std::tuple(n, s),
+                std::array{l_coeff[m] * value, l_coeff_conjugate[m] * Conjugate(value)});
+            cur_n = n;
+            cur_s = s;
         }
     }
-    z_tensor_ss.push_back(elem);
 
     double* r_tensor = (double*)mkl_malloc(M * M * sizeof(double), 64);
 
@@ -1046,20 +1026,19 @@ double* GenerateMatrixR(int N, const std::vector<MKL_Complex16>& l_coeff,
     return r_tensor;
 }
 
-// ОБЯЗАТЕЛЬНО ВЕРНУТЬСЯ К ЭТОМУ КОДУ И ЕГО ОПТИМИЗИРОВАТЬ!!!!
-template <size_t lindbladian_cnt>
+template <size_t sort_ind_f = 1, size_t sort_ind_z = 1, size_t lindbladian_cnt>
 double* GenerateMatrixRVec(
-    int N, const std::array<std::vector<MKL_Complex16>, lindbladian_cnt>& l_coeff,
+    const std::array<std::vector<MKL_Complex16>, lindbladian_cnt>& l_coeff,
     const std::array<std::vector<MKL_Complex16>, lindbladian_cnt>& l_coeff_conjugate,
     std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens) {
+    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N) {
 
     auto& f_tensor = *f_tens;
     auto& z_tensor = *z_tens;
 
     int M = N * N - 1;
 
-    // сортировка f_tensor по второму и третьему индексу
+    // сортировка по второму и третьему индексу
     auto cmp = []<typename T>(const std::pair<std::tuple<int, int, int>, T>& left,
                               const std::pair<std::tuple<int, int, int>, T>& right) {
         if (std::get<1>(left.first) == std::get<1>(right.first)) {
@@ -1068,72 +1047,67 @@ double* GenerateMatrixRVec(
         return std::get<1>(left.first) < std::get<1>(right.first);
     };
 
-    std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    // сортировка f_tensor по второму и третьему индексу
+    if constexpr (sort_ind_f == 1) {
+        std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+    } else if constexpr (sort_ind_f == 2) {
+        CountSortTensorNS(f_tens, N);
+    }
 
-    auto f_tensor_cmplx = DoubleToComplexTensor(f_tensor);
-
+    // сортировка z_tensor по второму и третьему индексу
+    if constexpr (sort_ind_z == 1) {
+        std::sort(z_tensor.begin(), z_tensor.end(), cmp);
+    } else if constexpr (sort_ind_z == 2) {
+        CountSortTensorNS(z_tens, N);
+    }
 
     double* r_tensor = (double*)mkl_malloc(M * M * sizeof(double), 64);
     memset(r_tensor, 0, M * M * sizeof(double));
 
+    std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> f_tensor_ss;
+    f_tensor_ss.reserve(f_tensor.size());
+    std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> z_tensor_ss;
+    z_tensor_ss.reserve(z_tensor.size());
     for (size_t cnt = 0; cnt < lindbladian_cnt; ++cnt) {
 
-        
-        std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>> elem = {
-            std::tuple(std::get<1>(f_tensor_cmplx[0].first), std::get<2>(f_tensor_cmplx[0].first)),
-            {l_coeff_conjugate[cnt][std::get<0>(f_tensor_cmplx[0].first)] * f_tensor_cmplx[0].second,
-             l_coeff[cnt][std::get<0>(f_tensor_cmplx[0].first)] * f_tensor_cmplx[0].second}};
+        int cur_n, cur_s;
+        cur_n = cur_s = -1;
 
-        std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> f_tensor_ss;
-
-        for (size_t i = 1; i < f_tensor_cmplx.size(); ++i) {
-            if (std::get<1>(f_tensor_cmplx[i - 1].first) == std::get<1>(f_tensor_cmplx[i].first) and
-                std::get<2>(f_tensor_cmplx[i - 1].first) == std::get<2>(f_tensor_cmplx[i].first)) {
-                elem.second[0] += l_coeff_conjugate[cnt][std::get<0>(f_tensor_cmplx[i].first)] *
-                                  f_tensor_cmplx[i].second;
-
-                elem.second[1] +=
-                    l_coeff[cnt][std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second;
+        for (size_t i = 0; i < f_tensor.size(); ++i) {
+            const auto& [f_ind, value] = f_tensor[i];
+            const auto& [m, n, s] = f_ind;
+            if (cur_n == n and cur_s == s) {
+                f_tensor_ss.back().second[0] += l_coeff_conjugate[cnt][m] * value;
+                f_tensor_ss.back().second[1] += l_coeff[cnt][m] * value;
             } else {
-                f_tensor_ss.push_back(elem);
-
-                elem = {std::tuple(std::get<1>(f_tensor_cmplx[i].first),
-                                   std::get<2>(f_tensor_cmplx[i].first)),
-                        {l_coeff_conjugate[cnt][std::get<0>(f_tensor_cmplx[i].first)] *
-                             f_tensor_cmplx[i].second,
-                         l_coeff[cnt][std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second}};
+                f_tensor_ss.emplace_back(
+                    std::tuple(n, s),
+                    std::array{l_coeff_conjugate[cnt][m] * value, l_coeff[cnt][m] * value});
+                cur_n = n;
+                cur_s = s;
             }
         }
-        f_tensor_ss.push_back(elem);
 
-        std::sort(z_tensor.begin(), z_tensor.end(), cmp);
+        cur_n = cur_s = -1;
 
-        elem = {
-            std::tuple(std::get<1>(z_tensor[0].first), std::get<2>(z_tensor[0].first)),
-            {l_coeff[cnt][std::get<0>(z_tensor[0].first)] * z_tensor[0].second,
-             l_coeff_conjugate[cnt][std::get<0>(z_tensor[0].first)] * Conjugate(z_tensor[0].second)}};
-
-        std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> z_tensor_ss;
-
-        for (size_t i = 1; i < z_tensor.size(); ++i) {
-            if (std::get<1>(z_tensor[i - 1].first) == std::get<1>(z_tensor[i].first) and
-                std::get<2>(z_tensor[i - 1].first) == std::get<2>(z_tensor[i].first)) {
-                elem.second[0] += l_coeff[cnt][std::get<0>(z_tensor[i].first)] * z_tensor[i].second;
-                elem.second[1] += l_coeff_conjugate[cnt][std::get<0>(z_tensor[i].first)] *
-                                  Conjugate(z_tensor[i].second);
+        for (size_t i = 0; i < z_tensor.size(); ++i) {
+            const auto& [z_ind, value] = z_tensor[i];
+            const auto& [m, n, s] = z_ind;
+            if (cur_n == n and cur_s == s) {
+                z_tensor_ss.back().second[0] += l_coeff[cnt][m] * value;
+                z_tensor_ss.back().second[1] += l_coeff_conjugate[cnt][m] * Conjugate(value);
             } else {
-                z_tensor_ss.push_back(elem);
-
-                elem = {std::tuple(std::get<1>(z_tensor[i].first), std::get<2>(z_tensor[i].first)),
-                        {l_coeff[cnt][std::get<0>(z_tensor[i].first)] * z_tensor[i].second,
-                         l_coeff_conjugate[cnt][std::get<0>(z_tensor[i].first)] *
-                             Conjugate(z_tensor[i].second)}};
+                z_tensor_ss.emplace_back(std::tuple(n, s),
+                                         std::array{l_coeff[cnt][m] * value,
+                                                    l_coeff_conjugate[cnt][m] * Conjugate(value)});
+                cur_n = n;
+                cur_s = s;
             }
         }
-        z_tensor_ss.push_back(elem);
 
         // Добавляем страж-элемент для упрощения проверки границ в циклах while
-        // Чтобы ниже в циклах не проверять end_z < z_tensor_ss.size() и end_f < f_tensor_ss.size()
+        // Чтобы ниже в циклах не проверять end_z < z_tensor_ss.size() и end_f <
+        // f_tensor_ss.size()
         z_tensor_ss.emplace_back(std::tuple(M, 0),
                                  std::array{MKL_Complex16{0, 0}, MKL_Complex16{0, 0}});
         f_tensor_ss.emplace_back(std::tuple(M, 0),
@@ -1168,127 +1142,9 @@ double* GenerateMatrixRVec(
             start_z = end_z;
             start_f = end_f;
         }
-    }
 
-    return r_tensor;
-}
-
-
-
-double* GenerateMatrixRVec(
-    int N, const std::vector<MKL_Complex16>& l_coeff,
-    const std::vector<MKL_Complex16>& l_coeff_conjugate,
-    std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens) {
-
-    auto& f_tensor = *f_tens;
-    auto& z_tensor = *z_tens;
-
-    int M = N * N - 1;
-
-    // сортировка f_tensor по второму и третьему индексу
-    auto cmp = []<typename T>(const std::pair<std::tuple<int, int, int>, T>& left,
-                              const std::pair<std::tuple<int, int, int>, T>& right) {
-        if (std::get<1>(left.first) == std::get<1>(right.first)) {
-            return std::get<2>(left.first) < std::get<2>(right.first);
-        }
-        return std::get<1>(left.first) < std::get<1>(right.first);
-    };
-
-    std::sort(f_tensor.begin(), f_tensor.end(), cmp);
-
-    auto f_tensor_cmplx = DoubleToComplexTensor(f_tensor);
-
-    double* r_tensor = (double*)mkl_malloc(M * M * sizeof(double), 64);
-    memset(r_tensor, 0, M * M * sizeof(double));
-
-    std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>> elem = {
-        std::tuple(std::get<1>(f_tensor_cmplx[0].first), std::get<2>(f_tensor_cmplx[0].first)),
-        {l_coeff_conjugate[std::get<0>(f_tensor_cmplx[0].first)] * f_tensor_cmplx[0].second,
-         l_coeff[std::get<0>(f_tensor_cmplx[0].first)] * f_tensor_cmplx[0].second}};
-
-    std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> f_tensor_ss;
-
-    for (size_t i = 1; i < f_tensor_cmplx.size(); ++i) {
-        if (std::get<1>(f_tensor_cmplx[i - 1].first) == std::get<1>(f_tensor_cmplx[i].first) and
-            std::get<2>(f_tensor_cmplx[i - 1].first) == std::get<2>(f_tensor_cmplx[i].first)) {
-            elem.second[0] +=
-                l_coeff_conjugate[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second;
-
-            elem.second[1] +=
-                l_coeff[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second;
-        } else {
-            f_tensor_ss.push_back(elem);
-
-            elem = {
-                std::tuple(std::get<1>(f_tensor_cmplx[i].first),
-                           std::get<2>(f_tensor_cmplx[i].first)),
-                {l_coeff_conjugate[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second,
-                 l_coeff[std::get<0>(f_tensor_cmplx[i].first)] * f_tensor_cmplx[i].second}};
-        }
-    }
-    f_tensor_ss.push_back(elem);
-
-    std::sort(z_tensor.begin(), z_tensor.end(), cmp);
-
-    elem = {std::tuple(std::get<1>(z_tensor[0].first), std::get<2>(z_tensor[0].first)),
-            {l_coeff[std::get<0>(z_tensor[0].first)] * z_tensor[0].second,
-             l_coeff_conjugate[std::get<0>(z_tensor[0].first)] * Conjugate(z_tensor[0].second)}};
-
-    std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> z_tensor_ss;
-
-    for (size_t i = 1; i < z_tensor.size(); ++i) {
-        if (std::get<1>(z_tensor[i - 1].first) == std::get<1>(z_tensor[i].first) and
-            std::get<2>(z_tensor[i - 1].first) == std::get<2>(z_tensor[i].first)) {
-            elem.second[0] += l_coeff[std::get<0>(z_tensor[i].first)] * z_tensor[i].second;
-            elem.second[1] +=
-                l_coeff_conjugate[std::get<0>(z_tensor[i].first)] * Conjugate(z_tensor[i].second);
-        } else {
-            z_tensor_ss.push_back(elem);
-
-            elem = {std::tuple(std::get<1>(z_tensor[i].first), std::get<2>(z_tensor[i].first)),
-                    {l_coeff[std::get<0>(z_tensor[i].first)] * z_tensor[i].second,
-                     l_coeff_conjugate[std::get<0>(z_tensor[i].first)] *
-                         Conjugate(z_tensor[i].second)}};
-        }
-    }
-    z_tensor_ss.push_back(elem);
-
-    // Добавляем страж-элемент для упрощения проверки границ в циклах while
-    // Чтобы ниже в циклах не проверять end_z < z_tensor_ss.size() и end_f < f_tensor_ss.size()
-    z_tensor_ss.emplace_back(std::tuple(M, 0),
-                             std::array{MKL_Complex16{0, 0}, MKL_Complex16{0, 0}});
-    f_tensor_ss.emplace_back(std::tuple(M, 0),
-                             std::array{MKL_Complex16{0, 0}, MKL_Complex16{0, 0}});
-
-    size_t start_z = 0;
-    size_t start_f = 0;
-    for (int l = 0; l < M; ++l) {
-        size_t end_z = start_z;
-        size_t end_f = start_f;
-
-        while (std::get<0>(z_tensor_ss[end_z].first) == l) {
-            ++end_z;
-        }
-
-        while (std::get<0>(f_tensor_ss[end_f].first) == l) {
-            ++end_f;
-        }
-
-        for (size_t i = start_z; i < end_z; ++i) {
-            for (size_t j = start_f; j < end_f; ++j) {
-                int s = std::get<1>(f_tensor_ss[j].first);
-                int n = std::get<1>(z_tensor_ss[i].first);
-
-                r_tensor[s * M + n] +=
-                    -0.25 * (f_tensor_ss[j].second[0] * z_tensor_ss[i].second[0] +
-                             f_tensor_ss[j].second[1] * z_tensor_ss[i].second[1])
-                                .real;
-            }
-        }
-
-        start_z = end_z;
-        start_f = end_f;
+        f_tensor_ss.clear();
+        z_tensor_ss.clear();
     }
 
     return r_tensor;

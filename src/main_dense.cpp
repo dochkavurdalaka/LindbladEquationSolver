@@ -7,7 +7,7 @@
 #include <chrono>
 
 #include "mkl.h"
-#include "generate_matrices_v2.h"
+#include "generate_matrices.h"
 #include "mkl_complex16.h"
 #include "lindblad_utils.h"
 
@@ -43,6 +43,7 @@ void calculate_f(double t, const double* v, double* result,
     // 1. Вычисляем матрицу A(t) = Q(t) + R
     cblas_dcopy(M * M, r_matrix, 1, workspace, 1);
 
+    
     for (const auto& [tpl, coeff] : q_matrix) {
         size_t index = std::get<0>(tpl) * M + std::get<1>(tpl);
         A[index] += coeff;

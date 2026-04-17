@@ -3,24 +3,14 @@
 #include <cmath>
 #include <iomanip>
 #include <cstring>
-#include <chrono>
 
 #include "mkl.h"
 #include "generate_matrices.h"
 #include "mkl_complex16.h"
 #include "lindblad_utils.h"
+#include "matrix_decomposition.h"
 
-MKL_Complex16 Trace(const MKL_Complex16* matrix, int n) {
-    MKL_Complex16 tr = {0.0, 0.0};
-    for (int i = 0; i < n; ++i) {
-        int diag_idx = i * n + i;
-        tr.real += matrix[diag_idx].real;
-        tr.imag += matrix[diag_idx].imag;
-    }
-    return tr;
-}
-
-// здесь и далее попробуем решить систему для константного H
+// здесь и далее решаем систему для константного H
 // тогда матрица Q тоже будет константной
 
 // Вспомогательная функция для печати вектора
@@ -33,143 +23,45 @@ void print_vector(const char* name, double t, const double* v, int M) {
 }
 
 // Реализация нашей векторной функции f(t, v) = (Q(t) + R)v + K
-// result = (Q(t) + R)v + K
-void calculate_f(double t, const double* v, double* result,
-                 const std::vector<std::pair<std::tuple<int, int>, double>>& q_matrix,
-                 const double* r_matrix, const double* k_vector, double* workspace, int M) {
-    double* A = workspace;
-
-    // 1. Вычисляем матрицу A(t) = Q(t) + R
-    cblas_dcopy(M * M, r_matrix, 1, workspace, 1);
-
-    for (const auto& [tpl, coeff] : q_matrix) {
-        size_t index = std::get<0>(tpl) * M + std::get<1>(tpl);
-        A[index] += coeff;
-    }
-
-    // 2. Вычисляем A(t) * v
+// В нашей модели H = const -> Q = const -> зараннее предрасчитываем  S = Q + R и передаем в функцию
+// result = Sv + K
+void CalculateFunc(const double* S, const double* v, const double* K, int M, double* result) {
+    cblas_dcopy(M, K, 1, result, 1);
     // cblas_dgemv: result = alpha*A*v + beta*result
     // Мы хотим result = 1.0 * A * v + 0.0 * result
     cblas_dgemv(CblasRowMajor, CblasNoTrans, M, M,  // Размеры матрицы A
                 1.0,                                // alpha
-                A, M,                               // Матрица A и ее lda
+                S, M,                               // Матрица A и ее lda
                 v, 1,                               // Вектор v и его инкремент
-                0.0,                                // beta
+                1.0,                                // beta
                 result, 1);                         // Результирующий вектор и его инкремент
-
-    // 3. Добавляем вектор K
-    // cblas_daxpy: result = 1.0 * K + result
-    cblas_daxpy(M, 1.0, k_vector, 1, result, 1);
 }
 
-std::vector<double> GetHCoef(MKL_Complex16* hamiltonian, int N) {
-    std::vector<double> h_coeff;
+struct Package {
 
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-            int index = j * N + k;
-            h_coeff.push_back(sqrt(2.) * hamiltonian[index].real);
-        }
+    Package(int N) {
+        int M = N * N - 1;
+        k1 = (double*)mkl_malloc(M * sizeof(double), 64);
+        k2 = (double*)mkl_malloc(M * sizeof(double), 64);
+        k3 = (double*)mkl_malloc(M * sizeof(double), 64);
+        k4 = (double*)mkl_malloc(M * sizeof(double), 64);
+        v_temp = (double*)mkl_malloc(M * sizeof(double), 64);
     }
 
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-            int index = k * N + j;
-            h_coeff.push_back(sqrt(2.) * hamiltonian[index].imag);
-        }
+    double* k1;
+    double* k2;
+    double* k3;
+    double* k4;
+    double* v_temp;
+
+    ~Package() {
+        mkl_free(k1);
+        mkl_free(k2);
+        mkl_free(k3);
+        mkl_free(k4);
+        mkl_free(v_temp);
     }
-
-    for (int l = 0; l < N - 1; ++l) {
-        double coeff = 0.;
-
-        for (int k = 0; k < l + 1; ++k) {
-            int index = k * N + k;
-            coeff += hamiltonian[index].real / sqrt((l + 1) * (l + 2));
-        }
-
-        int index = (l + 1) * N + (l + 1);
-        coeff += -sqrt(l + 1) * hamiltonian[index].real / sqrt(l + 2);
-
-        h_coeff.push_back(coeff);
-    }
-
-    return h_coeff;
-}
-
-std::vector<MKL_Complex16> GetLCoef(MKL_Complex16* lindbladian, int N) {
-    std::vector<MKL_Complex16> l_coeff;
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-            MKL_Complex16 coeff = (lindbladian[j * N + k] + lindbladian[k * N + j]) / sqrt(2);
-            l_coeff.push_back(coeff);
-        }
-    }
-
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-
-            int ind_one = j * N + k;
-            int ind_two = k * N + j;
-            MKL_Complex16 coeff;
-            coeff.real = lindbladian[ind_two].imag - lindbladian[ind_one].imag;
-            coeff.imag = lindbladian[ind_one].real - lindbladian[ind_two].real;
-            l_coeff.push_back(coeff / sqrt(2));
-        }
-    }
-
-    for (int l = 0; l < N - 1; ++l) {
-        MKL_Complex16 coeff = {0., 0.};
-
-        for (int k = 0; k < l + 1; ++k) {
-            int index = k * N + k;
-            coeff += lindbladian[index] / sqrt((l + 1) * (l + 2));
-        }
-
-        int index = (l + 1) * N + (l + 1);
-        coeff += -sqrt(l + 1) * lindbladian[index] / sqrt(l + 2);
-
-        l_coeff.push_back(coeff);
-    }
-
-    return l_coeff;
-}
-
-double* GetVCoef(MKL_Complex16* rho, int N) {
-    double* v_coeff = (double*)mkl_malloc((N * N - 1) * sizeof(double), 64);
-    size_t ind = 0;
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-            int index = j * N + k;
-            v_coeff[ind] = sqrt(2.) * rho[index].real;
-            ++ind;
-        }
-    }
-
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-            int index = k * N + j;
-            v_coeff[ind] = sqrt(2.) * rho[index].imag;
-            ++ind;
-        }
-    }
-
-    for (int l = 0; l < N - 1; ++l) {
-        double coeff = 0.;
-
-        for (int k = 0; k < l + 1; ++k) {
-            int index = k * N + k;
-            coeff += rho[index].real / sqrt((l + 1) * (l + 2));
-        }
-
-        int index = (l + 1) * N + (l + 1);
-        coeff += -sqrt(l + 1) * rho[index].real / sqrt(l + 2);
-
-        v_coeff[ind] = coeff;
-        ++ind;
-    }
-
-    return v_coeff;
-}
+};
 
 // Проверка приближенной эрмитовости: M == M^† в пределах eps
 double check_hermitian_approx(const MKL_Complex16* M, int d) {
@@ -186,21 +78,64 @@ double check_hermitian_approx(const MKL_Complex16* M, int d) {
     return result;
 }
 
+// ----------------------------------------------------------------------
+// helper: out = a + b * scalar (out = a + coeff * b), length N*N
+void AddScaled(size_t nn, const double* a, const double* b, double coeff, double* out) {
+
+    for (size_t k = 0; k < nn; ++k) {
+        out[k] = a[k] + coeff * b[k];
+    }
+
+    // cblas_dcopy(nn, a, 1, out, 1);
+    // MKL_Complex16 alpha = {coeff, 0.0};
+    // cblas_daxpy(nn, coeff, b, 1, out, 1);
+}
+
+// ----------------------------------------------------------------------
+// RK4 integrator step: rho_{n+1} = rho_n + dt/6*(k1 + 2k2 + 2k3 + k4)
+// where k1 = L(rho_n), k2 = L(rho_n + dt/2*k1), ...
+void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in, double* v_out,
+             const Package& package) {
+
+    size_t M = N * N - 1;
+
+    const auto& [k1, k2, k3, k4, v_temp] = package;
+
+    // --- Шаг метода Рунге-Кутты 4-го порядка ---
+
+    // k1 = f(t, v)
+    CalculateFunc(s_matrix, v_in, k_vector, M, k1);
+
+    // k2 = f(t + h/2, v + h/2 * k1)
+    AddScaled(M, v_in, k1, dt * 0.5, v_temp);
+    CalculateFunc(s_matrix, v_temp, k_vector, M, k2);
+
+    // k3 = f(t + h/2, v + h/2 * k2)
+    AddScaled(M, v_in, k2, dt * 0.5, v_temp);
+    CalculateFunc(s_matrix, v_temp, k_vector, M, k3);
+
+    // k4 = f(t + h, v + h * k3)
+    AddScaled(M, v_in, k3, dt, v_temp);
+    CalculateFunc(s_matrix, v_temp, k_vector, M, k4);
+
+    // v_out = v_in + dt/6 * (k1 + 2k2 + 2k3 + k4)
+    for (size_t k = 0; k < M; ++k) {
+        v_out[k] = v_in[k] + dt / 6 * (k1[k] + 2.0 * k2[k] + 2.0 * k3[k] + k4[k]);
+    }
+}
+
 int main() {
     // Параметры
-    int N = 5;
+    int N = 7;
     int M = N * N - 1;
 
-    // создаем гамильтониан с нулевым следом
-    MKL_Complex16* hamiltonian;
-    GenerateTracelessHamiltonian(N, 2, hamiltonian);
-
-    // создаем линдбладиан и заполняем его нулями
-    MKL_Complex16* lindbladian;
-    GenerateLp(N, 0, lindbladian);
-
-    MKL_Complex16* rho;
-    GenerateDensity(N, 2, rho);
+    VSLStreamStatePtr stream;
+    int seed = 0;
+    vslNewStream(&stream, VSL_BRNG_MT19937, seed);
+    MKL_Complex16* hamiltonian = GenerateTracelessHamiltonian(N, stream);
+    MKL_Complex16* lindbladian = GenerateLp(N, stream);
+    MKL_Complex16* rho = GenerateDensity(N, stream);
+    vslDeleteStream(&stream);
 
     // вычисляем коэффициенты h
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
@@ -212,36 +147,28 @@ int main() {
         elem = Conjugate(elem);
     }
 
-    // Вычисляем матрицу Коссаковски
-    std::vector<MKL_Complex16> a(M * M);
-    for (int i = 0; i < M; ++i) {
-        for (int j = 0; j < M; ++j) {
-            a[i * M + j] = l_coeff[i] * l_coeff_conjugate[j];
-        }
-    }
+    // вычисляем начальное значение вектора v
+    double* v = GetVCoef(rho, N);
 
     auto f_tensor = GenerateTensorF(N);
     auto d_tensor = GenerateTensorD(N);
     auto z_tensor = GenerateTensorZ(f_tensor, d_tensor);
 
-    auto q_matrix = GenerateCOOMatrixQ(&f_tensor, h_coeff);
+    auto q_matrix = GenerateCOOMatrixQ(&f_tensor, h_coeff, N);
 
-    double* k_vector = GenerateVectorK(N, a, f_tensor);
+    // Функтор, вычисляющий матрицу Коссаковски
+    auto kossakovski_func = [&l_coeff, &l_coeff_conjugate](size_t i, size_t j) {
+        return l_coeff[i] * l_coeff_conjugate[j];
+    };
 
-    double* r_matrix = GenerateMatrixR(N, l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor);
+    double* k_vector = GenerateVectorKWithFunctor(kossakovski_func, f_tensor, N);
 
-    // print_double_matrix_rowmajor(r_matrix, M, "r_matrix");
+    double* r_matrix = GenerateMatrixR(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
 
     // Начальные условия
     double t0 = 0.0;
 
-    // Временные векторы для РК4
-    double* k1 = (double*)mkl_malloc(M * sizeof(double), 64);
-    double* k2 = (double*)mkl_malloc(M * sizeof(double), 64);
-    double* k3 = (double*)mkl_malloc(M * sizeof(double), 64);
-    double* k4 = (double*)mkl_malloc(M * sizeof(double), 64);
-    double* v_temp = (double*)mkl_malloc(M * sizeof(double), 64);
-    double* v_sum = (double*)mkl_malloc(M * sizeof(double), 64);
+    Package package(N);
 
     // Параметры
     double t_end = 1.3;
@@ -249,36 +176,27 @@ int main() {
 
     double t = t0;
     std::cout << std::fixed << std::setprecision(6);
-    double* workspace = (double*)mkl_malloc(M * M * sizeof(double), 64);
-    double* v = GetVCoef(rho, N);
+    double* v_next = (double*)mkl_malloc(M * sizeof(double), 64);
+
+    // Мы подсчитываем функцию f(t, v) = (Q(t) + R)v + K
+    // В нашей модели H = const -> Q = const -> зараннее предрасчитываем  S = Q + R и передаем в
+    // функцию RK4Step
+
+    // S = Q + R
+    // R = 1.0 * Q + R  (то есть R = Q + R)
+
+    for (const auto& [tpl, coeff] : q_matrix) {
+        const auto& [s, n] = tpl;
+        size_t index = s * M + n;
+        r_matrix[index] += coeff;
+    }
+    double* s_matrix = r_matrix;
+
     while (t < t_end + h / 2) {
+        RK4Step(N, s_matrix, k_vector, h, v, v_next, package);
 
-        // --- Шаг метода Рунге-Кутты 4-го порядка ---
-
-        // k1 = f(t, v)
-        calculate_f(t, v, k1, q_matrix, r_matrix, k_vector, workspace, M);
-
-        // k2 = f(t + h/2, v + h/2 * k1)
-        cblas_dcopy(M, v, 1, v_temp, 1);            // v_temp = v
-        cblas_daxpy(M, 0.5 * h, k1, 1, v_temp, 1);  // v_temp = v + 0.5*h*k1
-        calculate_f(t + 0.5 * h, v_temp, k2, q_matrix, r_matrix, k_vector, workspace, M);
-
-        // k3 = f(t + h/2, v + h/2 * k2)
-        cblas_dcopy(M, v, 1, v_temp, 1);            // v_temp = v
-        cblas_daxpy(M, 0.5 * h, k2, 1, v_temp, 1);  // v_temp = v + 0.5*h*k2
-        calculate_f(t + 0.5 * h, v_temp, k3, q_matrix, r_matrix, k_vector, workspace, M);
-
-        // k4 = f(t + h, v + h * k3)
-        cblas_dcopy(M, v, 1, v_temp, 1);      // v_temp = v
-        cblas_daxpy(M, h, k3, 1, v_temp, 1);  // v_temp = v + h*k3
-        calculate_f(t + h, v_temp, k4, q_matrix, r_matrix, k_vector, workspace, M);
-
-        // Обновляем v: v = v + (h/6) * (k1 + 2k2 + 2k3 + k4)
-        cblas_dcopy(M, k1, 1, v_sum, 1);          // v_sum = k1
-        cblas_daxpy(M, 2.0, k2, 1, v_sum, 1);     // v_sum = k1 + 2*k2
-        cblas_daxpy(M, 2.0, k3, 1, v_sum, 1);     // v_sum = k1 + 2*k2 + 2*k3
-        cblas_daxpy(M, 1.0, k4, 1, v_sum, 1);     // v_sum = k1 + 2*k2 + 2*k3 + k4
-        cblas_daxpy(M, h / 6.0, v_sum, 1, v, 1);  // v = v + (h/6)*v_sum
+        // swap rho and rho_next
+        std::swap(v, v_next);
 
         print_vector("v", t, v, M);
 
@@ -305,18 +223,12 @@ int main() {
     mkl_free(hamiltonian);
     mkl_free(lindbladian);
     mkl_free(rho);
-    mkl_free(workspace);
     mkl_free(k_vector);
     mkl_free(r_matrix);
 
     // Освобождение памяти
     mkl_free(v);
-    mkl_free(k1);
-    mkl_free(k2);
-    mkl_free(k3);
-    mkl_free(k4);
-    mkl_free(v_temp);
-    mkl_free(v_sum);
+    mkl_free(v_next);
 
     return 0;
 }

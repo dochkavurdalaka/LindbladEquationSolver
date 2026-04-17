@@ -8,14 +8,30 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Включаем папку include для всех таргетов
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+
+file(GLOB TEST_SOURCES "src/*.cpp")
+
+# Преобразуем пути в имена программ
+set(PROGRAMS "")
+foreach(source_file ${TEST_SOURCES})
+    get_filename_component(program_name ${source_file} NAME_WE)
+    list(APPEND PROGRAMS ${program_name})
+endforeach()
+
 # Определяем список программ
-set(PROGRAMS hardcore original main main_dimer_test main_dimer main_with_lindbladians main_RK_control test_commutator test_f_tensor test_anticommutator test_d_tensor test_q_tensor q_tensor_experiments test_r_tensor test_k_tensor)
+# set(PROGRAMS test_perfomance_f_tensor_slow)
 
 # Добавляем путь к нашим модулям CMake
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Поиск MKL
-find_package(MKL REQUIRED)
+# Поиск OpenMP
+find_package(OpenMP REQUIRED)
+
+
+# find_package(MKLParallel REQUIRED)
+find_package(MKLSequential REQUIRED)
+
+set(MKL_TARGET MKL::MKL)
 
 
 # Функция для настройки санитайзеров
@@ -34,12 +50,31 @@ function(setup_sanitizers target)
             $<$<CONFIG:Asan>:-fsanitize=address>
             $<$<CONFIG:Asan>:-fsanitize=undefined>
         )
+
     endif()
+
+
 endfunction()
 
 # Создаем каждую программу
 foreach(program IN LISTS PROGRAMS)
-    add_executable(${program} src/${program}.cpp)
+
+    # Определяем путь к исходному файлу
+    set(SOURCE_FILE "")
+    
+    # Проверяем наличие файла в разных директориях
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/${program}.cpp)
+        set(SOURCE_FILE src/${program}.cpp)
+    elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/tests_on_correctness/${program}.cpp)
+        set(SOURCE_FILE src/tests_on_correctness/${program}.cpp)
+    elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/tests_on_perfomance/${program}.cpp)
+        set(SOURCE_FILE src/tests_on_perfomance/${program}.cpp)
+    else()
+        message(WARNING "Source file for ${program} not found in src/ or src/tests_on_correctness/ or src/tests_on_perfomance/")
+        continue()  # Пропускаем эту программу
+    endif()
+
+    add_executable(${program} ${SOURCE_FILE})
     
     # Общие флаги (передаем отдельно!)
     target_compile_options(${program} PRIVATE
@@ -73,7 +108,8 @@ foreach(program IN LISTS PROGRAMS)
 
     # Связывание с MKL и OpenMP
     target_link_libraries(${program} 
-        MKL::MKL
+        ${MKL_TARGET}
+        OpenMP::OpenMP_CXX
     )
     
     # Организация выходных файлов

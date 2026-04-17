@@ -23,6 +23,12 @@ MKL_Complex16 operator+=(MKL_Complex16 &a, const MKL_Complex16 &b) {
     return a;
 }
 
+MKL_Complex16 operator-=(MKL_Complex16 &a, const MKL_Complex16 &b) {
+    a.real -= b.real;
+    a.imag -= b.imag;
+    return a;
+}
+
 MKL_Complex16 operator*=(MKL_Complex16 &a, const MKL_Complex16 &b) {
     double real = a.real;
     a.real = real * b.real - a.imag * b.imag;
@@ -66,4 +72,14 @@ bool operator!=(const MKL_Complex16& obj, double val) {
 MKL_Complex16 Conjugate(MKL_Complex16 number) {
     number.imag = -number.imag;
     return number;
+}
+
+MKL_Complex16 Trace(const MKL_Complex16* matrix, int n) {
+    MKL_Complex16 tr = {0.0, 0.0};
+    for (int i = 0; i < n; ++i) {
+        int diag_idx = i * n + i;
+        tr.real += matrix[diag_idx].real;
+        tr.imag += matrix[diag_idx].imag;
+    }
+    return tr;
 }
