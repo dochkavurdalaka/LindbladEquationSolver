@@ -75,7 +75,6 @@ std::vector<MKL_Complex16> GetLCoef(MKL_Complex16* lindbladian, int N) {
     return l_coeff;
 }
 
-
 double* GetVCoef(MKL_Complex16* rho, int N) {
     double* v_coeff = (double*)mkl_malloc((N * N - 1) * sizeof(double), 64);
     size_t ind = 0;
@@ -111,4 +110,42 @@ double* GetVCoef(MKL_Complex16* rho, int N) {
     }
 
     return v_coeff;
+}
+
+MKL_Complex16* GetDensityBySUDecomposition(double* v, int N) {
+    MKL_Complex16* rho_final = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+    size_t ind = 0;
+    size_t offset = N * (N - 1) / 2;
+    for (int j = 0; j < N; ++j) {
+        for (int k = j + 1; k < N; ++k) {
+            rho_final[j * N + k].real = v[ind] / sqrt(2);
+            rho_final[k * N + j].real = v[ind] / sqrt(2);
+
+            rho_final[j * N + k].imag = -v[offset + ind] / sqrt(2);
+            rho_final[k * N + j].imag = v[offset + ind] / sqrt(2);
+
+            ++ind;
+        }
+    }
+
+    offset = N * (N - 1);
+
+    for (int k = 0; k < N - 1; ++k) {
+        rho_final[k * N + k] = {0, 0};
+        for (int l = k; l < N - 1; ++l) {
+            rho_final[k * N + k].real += v[offset + l] / sqrt((l + 1) * (l + 2));
+        }
+    }
+
+    rho_final[N * N - 1] = {0., 0.};
+
+    for (int l = 0; l < N - 1; ++l) {
+        rho_final[(l + 1) * N + l + 1].real += -v[offset + l] * sqrt(1. * (l + 1) / (l + 2));
+    }
+
+    for (int k = 0; k < N; ++k) {
+        rho_final[k * N + k].real += 1. / N;
+    }
+
+    return rho_final;
 }

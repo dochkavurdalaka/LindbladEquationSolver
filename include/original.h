@@ -1,6 +1,8 @@
 #pragma once
 
+#include <stdexcept>
 #include "mkl.h"
+
 
 void Commutator(const MKL_Complex16* A, const MKL_Complex16* B, MKL_Complex16* result, int N) {
     MKL_Complex16 alpha = {1.0, 0.0}, beta = {0.0, 0.0};
@@ -97,6 +99,7 @@ std::vector<MKL_Complex16*> CreateBasisArray(int N) {
                 for (MKL_Complex16* mat : basis_array) {
                     mkl_free(mat);
                 }
+                throw std::runtime_error("not enough memory");
                 // return 1;
             }
 
@@ -123,7 +126,7 @@ std::vector<MKL_Complex16*> CreateBasisArray(int N) {
                 for (MKL_Complex16* mat : basis_array) {
                     mkl_free(mat);
                 }
-                // return 1;
+                throw std::runtime_error("not enough memory");
             }
 
             // Инициализация
@@ -147,7 +150,7 @@ std::vector<MKL_Complex16*> CreateBasisArray(int N) {
             for (MKL_Complex16* mat : basis_array) {
                 mkl_free(mat);
             }
-            // return 1;
+            throw std::runtime_error("not enough memory");
         }
 
         // Инициализация

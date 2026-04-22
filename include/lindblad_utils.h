@@ -1026,12 +1026,14 @@ double* GenerateMatrixR(const std::vector<MKL_Complex16>& l_coeff,
     return r_tensor;
 }
 
-template <size_t sort_ind_f = 1, size_t sort_ind_z = 1, size_t lindbladian_cnt>
-double* GenerateMatrixRVec(
-    const std::array<std::vector<MKL_Complex16>, lindbladian_cnt>& l_coeff,
-    const std::array<std::vector<MKL_Complex16>, lindbladian_cnt>& l_coeff_conjugate,
+template <size_t sort_ind_f = 1, size_t sort_ind_z = 1>
+double* GenerateMatrixR(
+    const std::vector<std::vector<MKL_Complex16>>& l_coeff,
+    const std::vector<std::vector<MKL_Complex16>>& l_coeff_conjugate,
     std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
     std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N) {
+
+    size_t P = l_coeff.size();
 
     auto& f_tensor = *f_tens;
     auto& z_tensor = *z_tens;
@@ -1068,7 +1070,8 @@ double* GenerateMatrixRVec(
     f_tensor_ss.reserve(f_tensor.size());
     std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> z_tensor_ss;
     z_tensor_ss.reserve(z_tensor.size());
-    for (size_t cnt = 0; cnt < lindbladian_cnt; ++cnt) {
+
+    for (size_t cnt = 0; cnt < P; ++cnt) {
 
         int cur_n, cur_s;
         cur_n = cur_s = -1;
