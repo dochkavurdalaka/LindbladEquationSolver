@@ -166,13 +166,12 @@ double check_hermitian_approx(const MKL_Complex16* M, int d) {
 
 // ----------------------------------------------------------------------
 // helper: out = a + b * scalar (out = a + coeff * b), length N*N
-void AddScaled(size_t nn, const double* a, const double* b, double coeff,
-               double* out) {
- 
+void AddScaled(size_t nn, const double* a, const double* b, double coeff, double* out) {
+
     for (size_t k = 0; k < nn; ++k) {
         out[k] = a[k] + coeff * b[k];
     }
- 
+
     // cblas_dcopy(nn, a, 1, out, 1);
     // MKL_Complex16 alpha = {coeff, 0.0};
     // cblas_daxpy(nn, coeff, b, 1, out, 1);
@@ -181,8 +180,8 @@ void AddScaled(size_t nn, const double* a, const double* b, double coeff,
 // ----------------------------------------------------------------------
 // RK4 integrator step: rho_{n+1} = rho_n + dt/6*(k1 + 2k2 + 2k3 + k4)
 // where k1 = L(rho_n), k2 = L(rho_n + dt/2*k1), ...
-void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in,
-             double* v_out, const Package& package) {
+void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in, double* v_out,
+             const Package& package) {
 
     size_t M = N * N - 1;
 
@@ -205,24 +204,26 @@ void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in,
     AddScaled(M, v_in, k3, dt, v_temp);
     CalculateFunc(s_matrix, v_temp, k_vector, M, k4);
 
-
     // v_out = v_in + dt/6 * (k1 + 2k2 + 2k3 + k4)
     for (size_t k = 0; k < M; ++k) {
         v_out[k] = v_in[k] + dt / 6 * (k1[k] + 2.0 * k2[k] + 2.0 * k3[k] + k4[k]);
     }
-
 }
 
 int main() {
     // Параметры
     int N = 7;
+    int P = 2;
     size_t M = N * N - 1;
 
     VSLStreamStatePtr stream;
     int seed = 0;
     vslNewStream(&stream, VSL_BRNG_MT19937, seed);
     MKL_Complex16* hamiltonian = GenerateTracelessHamiltonian(N, stream);
-    MKL_Complex16* lindbladian = GenerateLp(N, stream);
+    std::vector<MKL_Complex16*> lindbladians(P);
+    for (int i = 0; i < P; ++i) {
+        lindbladians[i] = GenerateLp(N, stream);
+    }
     MKL_Complex16* rho = GenerateDensity(N, stream);
     vslDeleteStream(&stream);
 
@@ -242,12 +243,25 @@ int main() {
     }
     std::cout << "\n";
     // вычисляем коэффициенты l
-    std::vector<MKL_Complex16> l_coeff = GetLCoef(basis_array, lindbladian, N, dummy_result);
-
-    std::cout << "l_coeff:\n";
-    for (auto el : l_coeff) {
-        std::cout << el.real << " " << el.imag << " ";
+    std::vector<std::vector<MKL_Complex16>> l_coeffs(P);
+    for (int i = 0; i < P; ++i) {
+        l_coeffs[i] = GetLCoef(basis_array, lindbladians[i], N, dummy_result);
     }
+
+    std::vector<std::vector<MKL_Complex16>> l_coeffs_conjugate(l_coeffs);
+    for (auto& vec : l_coeffs_conjugate) {
+        for (auto& elem : vec) {
+            elem = Conjugate(elem);
+        }
+    }
+
+    auto kossakovski_func = [&l_coeffs, &l_coeffs_conjugate, P](size_t i, size_t j) {
+        MKL_Complex16 result = {0., 0.};
+        for (int cnt = 0; cnt < P; ++cnt) {
+            result += l_coeffs[cnt][i] * l_coeffs_conjugate[cnt][j];
+        }
+        return result;
+    };
 
     // Общее количество элементов
     size_t total_elements = M * M * M;
@@ -346,7 +360,7 @@ int main() {
         for (size_t n = 0; n < M; ++n) {
             for (size_t s = 0; s < M; ++s) {
                 size_t f_index = m * M * M + n * M + s;
-                k_vector[s] += (l_coeff[m] * Conjugate(l_coeff[n]) * f_tensor[f_index]).imag;
+                k_vector[s] += (kossakovski_func(m, n) * f_tensor[f_index]).imag;
             }
         }
     }
@@ -377,7 +391,7 @@ int main() {
                         f_ind = j * M * M + l * M + s;
                         term += Conjugate(z_tensor[z_ind]) * f_tensor[f_ind];
 
-                        sum_jkl += (l_coeff[j] * Conjugate(l_coeff[k]) * term).real;
+                        sum_jkl += (kossakovski_func(j, k) * term).real;
                     }
                 }
             }
@@ -401,17 +415,17 @@ int main() {
     double* v_next = (double*)mkl_malloc(M * sizeof(double), 64);
 
     // Мы подсчитываем функцию f(t, v) = (Q(t) + R)v + K
-    // В нашей модели H = const -> Q = const -> зараннее предрасчитываем  S = Q + R и передаем в функцию RK4Step
+    // В нашей модели H = const -> Q = const -> зараннее предрасчитываем  S = Q + R и передаем в
+    // функцию RK4Step
 
     // S = Q + R
     // R = 1.0 * Q + R  (то есть R = Q + R)
     cblas_daxpy(M * M, 1.0, q_matrix, 1, r_matrix, 1);
     double* s_matrix = r_matrix;
 
-
     while (t < t_end + h / 2) {
         RK4Step(N, s_matrix, k_vector, h, v, v_next, package);
- 
+
         // swap rho and rho_next
         std::swap(v, v_next);
 
@@ -438,7 +452,9 @@ int main() {
 
     mkl_free(dummy_result);
     mkl_free(hamiltonian);
-    mkl_free(lindbladian);
+    for (int i = 0; i < P; ++i) {
+        mkl_free(lindbladians[i]);
+    }
     mkl_free(rho);
     mkl_free(rho_final);
     mkl_free(f_tensor);

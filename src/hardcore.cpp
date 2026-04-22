@@ -203,16 +203,19 @@ void ComputeLd(int N, const MKL_Complex16* L, const MKL_Complex16* rho, MKL_Comp
 
 // ----------------------------------------------------------------------
 // total Liouvillian L(rho) = -i[H,rho] + Ld
-void LiouvillianOfRho(int N, const MKL_Complex16* H, const MKL_Complex16* L,
-                      const MKL_Complex16* rho, MKL_Complex16* out, const Package& package) {
+void LiouvillianOfRho(int N, const MKL_Complex16* H,
+                      const std::vector<MKL_Complex16*>& lindbladians, const MKL_Complex16* rho,
+                      MKL_Complex16* out, const Package& package) {
 
     const auto& Ld = package.liouvillian_of_rho.Ld;
 
     ComputeCommutator(N, H, rho, out);
-    ComputeLd(N, L, rho, Ld, package);
 
-    MKL_Complex16 alpha = {1.0, 0.0};
-    cblas_zaxpy(N * N, &alpha, Ld, 1, out, 1);
+    for (size_t i = 0; i < lindbladians.size(); ++i) {
+        ComputeLd(N, lindbladians[i], rho, Ld, package);
+        MKL_Complex16 alpha = {1.0, 0.0};
+        cblas_zaxpy(N * N, &alpha, Ld, 1, out, 1);
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -232,29 +235,30 @@ void AddScaled(int nn, const MKL_Complex16* a, const MKL_Complex16* b, double co
 // ----------------------------------------------------------------------
 // RK4 integrator step: rho_{n+1} = rho_n + dt/6*(k1 + 2k2 + 2k3 + k4)
 // where k1 = L(rho_n), k2 = L(rho_n + dt/2*k1), ...
-void RK4Step(int N, const MKL_Complex16* H, const MKL_Complex16* L, double dt,
-             const MKL_Complex16* rho_in, MKL_Complex16* rho_out, const Package& package) {
+void RK4Step(int N, const MKL_Complex16* H, const std::vector<MKL_Complex16*>& lindbladians,
+             double dt, const MKL_Complex16* rho_in, MKL_Complex16* rho_out,
+             const Package& package) {
     int nn = N * N;
 
     const auto& [k1, k2, k3, k4, rho_temp] = package.rk4_step;
 
     // k1 = L(rho_in)
-    LiouvillianOfRho(N, H, L, rho_in, k1, package);
+    LiouvillianOfRho(N, H, lindbladians, rho_in, k1, package);
 
     // rho_temp = rho_in + dt/2 * k1
     AddScaled(nn, rho_in, k1, dt * 0.5, rho_temp);
     // k2 = L(rho_in + dt/2 * k1)
-    LiouvillianOfRho(N, H, L, rho_temp, k2, package);
+    LiouvillianOfRho(N, H, lindbladians, rho_temp, k2, package);
 
     // rho_temp = rho_in + dt/2 * k2
     AddScaled(nn, rho_in, k2, dt * 0.5, rho_temp);
     // k3 = L(rho_in + dt/2 * k2)
-    LiouvillianOfRho(N, H, L, rho_temp, k3, package);
+    LiouvillianOfRho(N, H, lindbladians, rho_temp, k3, package);
 
     // rho_temp = rho_in + dt * k3
     AddScaled(nn, rho_in, k3, dt, rho_temp);
     // k4 = L(rho_in + dt * k3)
-    LiouvillianOfRho(N, H, L, rho_temp, k4, package);
+    LiouvillianOfRho(N, H, lindbladians, rho_temp, k4, package);
 
     // rho_out = rho_in + dt/6 * (k1 + 2k2 + 2k3 + k4)
     for (int k = 0; k < nn; ++k) {
@@ -297,6 +301,7 @@ void print_mat(int N, const MKL_Complex16* A, const char* name) {
 int main() {
     // Параметры
     int N = 7;
+    int P = 2;
 
     Package package(N);
 
@@ -304,7 +309,10 @@ int main() {
     int seed = 0;
     vslNewStream(&stream, VSL_BRNG_MT19937, seed);
     MKL_Complex16* hamiltonian = GenerateTracelessHamiltonian(N, stream);
-    MKL_Complex16* lindbladian = GenerateLp(N, stream);
+    std::vector<MKL_Complex16*> lindbladians(P);
+    for (int i = 0; i < P; ++i) {
+        lindbladians[i] = GenerateLp(N, stream);
+    }
     MKL_Complex16* rho = GenerateDensity(N, stream);
     vslDeleteStream(&stream);
 
@@ -325,7 +333,7 @@ int main() {
     std::cout << std::fixed << std::setprecision(6);
     while (t < t_end + h / 2) {
 
-        RK4Step(N, hamiltonian, lindbladian, h, rho, rho_next, package);
+        RK4Step(N, hamiltonian, lindbladians, h, rho, rho_next, package);
 
         // swap rho and rho_next
         std::swap(rho, rho_next);
@@ -341,7 +349,9 @@ int main() {
     mkl_free(rho_next);
 
     mkl_free(hamiltonian);
-    mkl_free(lindbladian);
+    for (int i = 0; i < P; ++i) {
+        mkl_free(lindbladians[i]);
+    }
     mkl_free(rho);
 
     return 0;

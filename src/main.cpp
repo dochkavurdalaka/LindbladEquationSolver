@@ -22,6 +22,19 @@ void print_vector(const char* name, double t, const double* v, int M) {
     std::cout << "]" << std::endl;
 }
 
+// ----------------------------------------------------------------------
+// small utility: print matrix
+void print_mat(int N, const MKL_Complex16* A, const char* name) {
+    printf("%s =\n", name);
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            MKL_Complex16 x = A[i * N + j];
+            printf("(% .6f,% .6f)  ", x.real, x.imag);
+        }
+        printf("\n");
+    }
+}
+
 // Реализация нашей векторной функции f(t, v) = (Q(t) + R)v + K
 // В нашей модели H = const -> Q = const -> зараннее предрасчитываем  S = Q + R и передаем в функцию
 // result = Sv + K
@@ -127,25 +140,44 @@ void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in,
 int main() {
     // Параметры
     int N = 7;
+    int P = 2;
     int M = N * N - 1;
 
     VSLStreamStatePtr stream;
     int seed = 0;
     vslNewStream(&stream, VSL_BRNG_MT19937, seed);
     MKL_Complex16* hamiltonian = GenerateTracelessHamiltonian(N, stream);
-    MKL_Complex16* lindbladian = GenerateLp(N, stream);
+    std::vector<MKL_Complex16*> lindbladians(P);
+    for (int i = 0; i < P; ++i) {
+        lindbladians[i] = GenerateLp(N, stream);
+    }
     MKL_Complex16* rho = GenerateDensity(N, stream);
     vslDeleteStream(&stream);
 
     // вычисляем коэффициенты h
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
-    // вычисляем коэффициенты l
-    std::vector<MKL_Complex16> l_coeff = GetLCoef(lindbladian, N);
 
-    std::vector<MKL_Complex16> l_coeff_conjugate(l_coeff);
-    for (auto& elem : l_coeff_conjugate) {
-        elem = Conjugate(elem);
+    // вычисляем коэффициенты l
+    std::vector<std::vector<MKL_Complex16>> l_coeffs(P);
+    for (int i = 0; i < P; ++i) {
+        l_coeffs[i] = GetLCoef(lindbladians[i], N);
     }
+
+    std::vector<std::vector<MKL_Complex16>> l_coeffs_conjugate(l_coeffs);
+    for (auto& vec : l_coeffs_conjugate) {
+        for (auto& elem : vec) {
+            elem = Conjugate(elem);
+        }
+    }
+
+    // Функтор, вычисляющий матрицу Коссаковски
+    auto kossakovski_func = [&l_coeffs, &l_coeffs_conjugate, P](size_t i, size_t j) {
+        MKL_Complex16 result = {0., 0.};
+        for (int cnt = 0; cnt < P; ++cnt) {
+            result += l_coeffs[cnt][i] * l_coeffs_conjugate[cnt][j];
+        }
+        return result;
+    };
 
     // вычисляем начальное значение вектора v
     double* v = GetVCoef(rho, N);
@@ -156,14 +188,9 @@ int main() {
 
     auto q_matrix = GenerateCOOMatrixQ(&f_tensor, h_coeff, N);
 
-    // Функтор, вычисляющий матрицу Коссаковски
-    auto kossakovski_func = [&l_coeff, &l_coeff_conjugate](size_t i, size_t j) {
-        return l_coeff[i] * l_coeff_conjugate[j];
-    };
-
     double* k_vector = GenerateVectorKWithFunctor(kossakovski_func, f_tensor, N);
 
-    double* r_matrix = GenerateMatrixR(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
+    double* r_matrix = GenerateMatrixR(l_coeffs, l_coeffs_conjugate, &f_tensor, &z_tensor, N);
 
     // Начальные условия
     double t0 = 0.0;
@@ -184,7 +211,6 @@ int main() {
 
     // S = Q + R
     // R = 1.0 * Q + R  (то есть R = Q + R)
-
     for (const auto& [tpl, coeff] : q_matrix) {
         const auto& [s, n] = tpl;
         size_t index = s * M + n;
@@ -203,25 +229,15 @@ int main() {
         t += h;
     }
 
-    // MKL_Complex16* matrix_rho = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
-    // memset(matrix_rho, 0, N * N * sizeof(MKL_Complex16));
 
-    // for (int i = 0; i < N * N; ++i) {
-    //     for (int j = 0; j < M; ++j) {
-    //         matrix_rho[i] += v[j] * basis_array[j][i];
-    //     }
-    // }
+    MKL_Complex16* rho_final = GetDensityBySUDecomposition(v, N);
+    print_mat(N, rho_final, "rho");
 
-    // // print_matrix_rowmajor(matrix_rho, N, "result");
-    // MKL_Complex16 tr = Trace(matrix_rho, N);
-
-    // std::cout << std::fixed << std::setprecision(17) << tr.real << "\n";
-
-    // std::cout << std::fixed << std::setprecision(17) << check_hermitian_approx(matrix_rho, N)
-    //           << "\n";
-
+    mkl_free(rho_final);
     mkl_free(hamiltonian);
-    mkl_free(lindbladian);
+    for (int i = 0; i < P; ++i) {
+        mkl_free(lindbladians[i]);
+    }
     mkl_free(rho);
     mkl_free(k_vector);
     mkl_free(r_matrix);
