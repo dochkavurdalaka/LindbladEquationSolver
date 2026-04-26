@@ -1,16 +1,21 @@
 #include <iostream>
 #include <vector>
+#include <array>
 #include <cmath>
 #include <iomanip>
 #include <cstring>
+#include <chrono>
 
 #include "mkl.h"
 #include "generate_matrices.h"
 #include "mkl_complex16.h"
+#include "lindblad_utils.h"
 #include "matrix_decomposition.h"
 
 #include "lindblad_utils_dimer.h"
 
+// здесь и далее попробуем решить систему для константного H
+// тогда матрица Q тоже будет константной
 
 // Вспомогательная функция для печати вектора
 void print_vector(const char* name, double t, const double* v, int M) {
@@ -48,16 +53,27 @@ struct Package {
 
 // Реализация нашей векторной функции f(t, v) = (Q(t) + R)v + K
 // result = (Q(t) + R)v + K
-void CalculateFunc(size_t M, sparse_matrix_t q_matrix, sparse_matrix_t r_matrix, const double* v, const double* k_vector, double* result) {
+void CalculateFunc(size_t M, const std::vector<std::pair<std::tuple<int, int>, double>>& q_matrix,
+                   double* r_matrix, const double* v, const double* k_vector, double* result) {
+
+    // result = K
     cblas_dcopy(M, k_vector, 1, result, 1);
-    // Создаем дескриптор один раз с помощью static
-    static struct matrix_descr descr = {
-        SPARSE_MATRIX_TYPE_GENERAL,  // Обычная матрица
-        SPARSE_FILL_MODE_UPPER,      // Не используется, но заполняем
-        SPARSE_DIAG_NON_UNIT         // Не используется, но заполняем
-    };
-    mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, q_matrix, descr, v, 1.0, result);
-    mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, r_matrix, descr, v, 1.0, result);
+
+    // 2. Вычисляем Rv + K
+    // получаем result += Rv
+    cblas_dgemv(CblasRowMajor, CblasNoTrans, M, M,  // Размеры матрицы A
+                1.0,                                // alpha
+                r_matrix, M,                        // Матрица A и ее lda
+                v, 1,                               // Вектор v и его инкремент
+                1.0,                                // beta
+                result, 1);                         // Результирующий вектор и его инкремент
+
+    // 2. Вычисляем Qv + Rv + K
+    // получаем result += Qv
+    for (const auto& [tpl, value] : q_matrix) {
+        const auto& [s, n] = tpl;
+        result[s] += value * v[n];
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -76,39 +92,45 @@ void AddScaled(size_t nn, const double* a, const double* b, double coeff, double
 // ----------------------------------------------------------------------
 // RK4 integrator step: v_{n+1} = v_n + dt/6*(k1 + 2k2 + 2k3 + k4)
 // where k1 = L(v_n), k2 = L(v_n + dt/2*k1), ...
-void RK4Step(double t, sparse_matrix_t r_matrix, const double* k_vector, const auto& container, double dt, double* v_in, double* v_out,
-             const Package& package) {
-
-    const auto& [h_coef, model, q_builder] = container;
-    size_t N = container.model->N;
+void RK4Step(double t, std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
+             MKL_Complex16* hamiltonian, const auto& model, double* r_matrix, double* k_vector,
+             double dt, double* v_in, double* v_out, const Package& package) {
+    size_t N = model.N;
     size_t M = N * N - 1;
-
-    sparse_matrix_t q_matrix = q_builder->GetMatrix();
 
     const auto& [k1, k2, k3, k4, v_temp] = package;
 
     // --- Шаг метода Рунге-Кутты 4-го порядка ---
 
+
     // k1 = f(t, v)
-    model->GetUpdateHCoefDimer(h_coef, t);
-    q_builder->UpdateValues(*h_coef);
+    model.FillHamiltonian(hamiltonian, t);
+    std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
+    auto q_matrix = GenerateCOOMatrixQ<0>(f_tens, h_coeff, N);
     CalculateFunc(M, q_matrix, r_matrix, v_in, k_vector, k1);
 
+
     // k2 = f(t + h/2, v + h/2 * k1)
-    model->GetUpdateHCoefDimer(h_coef, t + 0.5*dt);
-    q_builder->UpdateValues(*h_coef);
+    model.FillHamiltonian(hamiltonian, t + 0.5 * dt);
+    h_coeff = GetHCoef(hamiltonian, N);
+    q_matrix = GenerateCOOMatrixQ<0>(f_tens, h_coeff, N);
     AddScaled(M, v_in, k1, dt * 0.5, v_temp);
     CalculateFunc(M, q_matrix, r_matrix, v_temp, k_vector, k2);
 
+
     // k3 = f(t + h/2, v + h/2 * k2)
+    // q_matrix никак не изменился с прошлого подсчета
     AddScaled(M, v_in, k2, dt * 0.5, v_temp);
     CalculateFunc(M, q_matrix, r_matrix, v_temp, k_vector, k3);
 
+
     // k4 = f(t + h, v + h * k3)
-    model->GetUpdateHCoefDimer(h_coef, t + dt);
-    q_builder->UpdateValues(*h_coef);
+    model.FillHamiltonian(hamiltonian, t + dt);
+    h_coeff = GetHCoef(hamiltonian, N);
+    q_matrix = GenerateCOOMatrixQ<0>(f_tens, h_coeff, N);
     AddScaled(M, v_in, k3, dt, v_temp);
     CalculateFunc(M, q_matrix, r_matrix, v_temp, k_vector, k4);
+
 
     // v_out = v_in + dt/6 * (k1 + 2k2 + 2k3 + k4)
     for (size_t k = 0; k < M; ++k) {
@@ -116,20 +138,10 @@ void RK4Step(double t, sparse_matrix_t r_matrix, const double* k_vector, const a
     }
 }
 
-template <size_t sort_ind, class Functor>
-struct CalculateFunctionContainer {
-    std::vector<double>* h_coeff;
-    DimerModel<Functor>* model;
-    SparseQBuilder<sort_ind>* q_builder;
-    CalculateFunctionContainer(DimerModel<Functor>* m, SparseQBuilder<sort_ind>* q_build) : model(m), q_builder(q_build) {}
-};
-
 int main() {
     // Параметры
-    size_t N = 5;
-    size_t M = N * N - 1;
-    Package package(N);
-
+    int N = 5;
+    int M = N * N - 1;
 
     auto theta = [T = 2 * std::numbers::pi](double t) {
         t = fmod(t, T);
@@ -140,13 +152,19 @@ int main() {
     };
     DimerModel<decltype(theta)> model(theta, N);
 
+    // --- RNG
     VSLStreamStatePtr stream;
     int seed = 0;
     vslNewStream(&stream, VSL_BRNG_MT19937, seed);
     MKL_Complex16* rho = GenerateDensity(N, stream);
     vslDeleteStream(&stream);
 
-    std::vector<MKL_Complex16> l_coeff = model.GetLCoefDimer();
+    MKL_Complex16* hamiltonian = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+    MKL_Complex16* lindbladian = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
+    model.FillLindbladian(lindbladian);
+
+
+    std::vector<MKL_Complex16> l_coeff = GetLCoef(lindbladian, N);
     std::vector<MKL_Complex16> l_coeff_conjugate(l_coeff);
     for (auto& elem : l_coeff_conjugate) {
         elem = Conjugate(elem);
@@ -157,32 +175,31 @@ int main() {
         result += l_coeff[i] * l_coeff_conjugate[j];
         return result;
     };
-    std::vector<double> h_coeff = model.GetBaseHCoefDimer(0.);
+
     auto f_tensor = GenerateTensorF(N);
     auto d_tensor = GenerateTensorD(N);
     auto z_tensor = GenerateTensorZ(f_tensor, d_tensor);
 
-    SparseQBuilder q_builder(&f_tensor, h_coeff, N);
-    SparseRBuilder r_builder(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
-
-    CalculateFunctionContainer container(&model, &q_builder);
-    container.h_coeff = &h_coeff;
+    double t0 = 0.0;
 
     double* k_vector = GenerateVectorKWithFunctor(kossakovski_func, f_tensor, N);
-    sparse_matrix_t r_matrix = r_builder.GetMatrix();
+    double* r_matrix = GenerateMatrixR(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
+
+    Package package(N);
+
+    std::cout << std::fixed << std::setprecision(6);
 
     // Параметры
-    double t0 = 0.0;
     double t_end = 1.1;
     double h = 0.01;
 
     double t = t0;
-    std::cout << std::fixed << std::setprecision(6);
     double* v = GetVCoef(rho, N);
     double* v_next = (double*)mkl_malloc(M * sizeof(double), 64);
 
+    CountSortTensorSN(&f_tensor, N);
     while (t < t_end + h / 2) {
-        RK4Step(t, r_matrix, k_vector, container, h, v, v_next, package);
+        RK4Step(t, &f_tensor, hamiltonian, model, r_matrix, k_vector, h, v, v_next, package);
 
         // swap rho and rho_next
         std::swap(v, v_next);
@@ -192,12 +209,16 @@ int main() {
         t += h;
     }
 
+    mkl_free(hamiltonian);
+    mkl_free(lindbladian);
 
-    mkl_free(rho);
     mkl_free(k_vector);
+    mkl_free(r_matrix);
+    mkl_free(rho);
 
     // Освобождение памяти
     mkl_free(v);
     mkl_free(v_next);
+
     return 0;
 }

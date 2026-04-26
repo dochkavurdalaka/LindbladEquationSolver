@@ -105,8 +105,8 @@ void AddScaled(size_t nn, const double* a, const double* b, double coeff, double
 }
 
 // ----------------------------------------------------------------------
-// RK4 integrator step: rho_{n+1} = rho_n + dt/6*(k1 + 2k2 + 2k3 + k4)
-// where k1 = L(rho_n), k2 = L(rho_n + dt/2*k1), ...
+// RK4 integrator step: v_{n+1} = v_n + dt/6*(k1 + 2k2 + 2k3 + k4)
+// where k1 = L(v_n), k2 = L(v_n + dt/2*k1), ...
 void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in, double* v_out,
              const Package& package) {
 
@@ -192,14 +192,15 @@ int main() {
 
     double* r_matrix = GenerateMatrixR(l_coeffs, l_coeffs_conjugate, &f_tensor, &z_tensor, N);
 
+    Package package(N);
     // Начальные условия
     double t0 = 0.0;
 
-    Package package(N);
 
     // Параметры
     double t_end = 1.3;
     double h = 0.01;
+    double eps_gr = 1e-7;
 
     double t = t0;
     std::cout << std::fixed << std::setprecision(6);
@@ -218,16 +219,24 @@ int main() {
     }
     double* s_matrix = r_matrix;
 
-    while (t < t_end + h / 2) {
+    while (t + h < t_end) {
         RK4Step(N, s_matrix, k_vector, h, v, v_next, package);
 
         // swap rho and rho_next
         std::swap(v, v_next);
 
-        print_vector("v", t, v, M);
+        print_vector("v", t + h, v, M);
 
         t += h;
     }
+
+    if(t_end - t > eps_gr) {
+        RK4Step(N, s_matrix, k_vector, t_end - t, v, v_next, package);
+        // swap rho and rho_next
+        std::swap(v, v_next);
+        print_vector("v", t_end, v, M);
+    }
+
 
 
     MKL_Complex16* rho_final = GetDensityBySUDecomposition(v, N);

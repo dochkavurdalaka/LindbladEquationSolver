@@ -264,25 +264,6 @@ void RK4Step(int N, const MKL_Complex16* H, const std::vector<MKL_Complex16*>& l
     for (int k = 0; k < nn; ++k) {
         rho_out[k] = rho_in[k] + dt / 6 * (k1[k] + 2.0 * k2[k] + 2.0 * k3[k] + k4[k]);
     }
-
-    // MKL_Complex16 alpha = {dt / 6.0, 0.0};
-    // // rho_out = rho_in
-    // cblas_zcopy(nn, rho_in, 1, rho_out, 1);
-
-    // // rho_out += dt/6 * k1
-    // cblas_zaxpy(nn, &alpha, k1, 1, rho_out, 1);
-
-    // // rho_out += 2dt/6 * k2
-    // alpha = {dt / 3.0, 0.0};
-    // cblas_zaxpy(nn, &alpha, k2, 1, rho_out, 1);
-
-    // // rho_out += 2dt/6 * k3
-    // alpha = {dt / 3.0, 0.0};
-    // cblas_zaxpy(nn, &alpha, k3, 1, rho_out, 1);
-
-    // // rho_out += dt/6 * k4
-    // alpha = {dt / 6.0, 0.0};
-    // cblas_zaxpy(nn, &alpha, k4, 1, rho_out, 1);
 }
 
 // ----------------------------------------------------------------------
@@ -326,12 +307,13 @@ int main() {
     // Параметры
     double t_end = 1.3;
     double h = 0.01;
+    double eps_gr = 1e-7;
 
     double t0 = 0.0;
 
     double t = t0;
     std::cout << std::fixed << std::setprecision(6);
-    while (t < t_end + h / 2) {
+    while (t + h < t_end) {
 
         RK4Step(N, hamiltonian, lindbladians, h, rho, rho_next, package);
 
@@ -339,9 +321,17 @@ int main() {
         std::swap(rho, rho_next);
 
         SUBasisDecompose(rho, N, &v);
-        print_vector("", t, v.data(), N * N - 1);
+        print_vector("v", t + h, v.data(), N * N - 1);
 
         t += h;
+    }
+
+    if(t_end - t > eps_gr) {
+        RK4Step(N, hamiltonian, lindbladians, h, rho, rho_next, package);
+        // swap rho and rho_next
+        std::swap(rho, rho_next);
+        SUBasisDecompose(rho, N, &v);
+        print_vector("v", t_end, v.data(), N * N - 1);
     }
 
     print_mat(N, rho, "rho");

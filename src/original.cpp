@@ -409,6 +409,7 @@ int main() {
     // Параметры
     double t_end = 1.3;
     double h = 0.01;
+    double eps_gr = 1e-7;
 
     double t = t0;
     std::cout << std::fixed << std::setprecision(6);
@@ -423,15 +424,22 @@ int main() {
     cblas_daxpy(M * M, 1.0, q_matrix, 1, r_matrix, 1);
     double* s_matrix = r_matrix;
 
-    while (t < t_end + h / 2) {
+    while (t + h < t_end) {
         RK4Step(N, s_matrix, k_vector, h, v, v_next, package);
 
         // swap rho and rho_next
         std::swap(v, v_next);
 
-        print_vector("v", t, v, M);
+        print_vector("v", t + h, v, M);
 
         t += h;
+    }
+
+    if(t_end - t > eps_gr) {
+        RK4Step(N, s_matrix, k_vector, t_end - t, v, v_next, package);
+        // swap rho and rho_next
+        std::swap(v, v_next);
+        print_vector("v", t_end, v, M);
     }
 
     MKL_Complex16* rho_final = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
