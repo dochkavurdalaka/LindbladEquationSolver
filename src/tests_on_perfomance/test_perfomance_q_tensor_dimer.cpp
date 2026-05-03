@@ -61,12 +61,12 @@ int main(int argc, char* argv[]) {
 
     std::vector<double> h_coeff = model.GetBaseHCoefDimer(0.);
 
-    auto f_tensor = GenerateTensorF<0>(N);
+    auto f_tensor = GenerateTensorF(N);
 
     RAMMeter meter;
     Timer timer;
     SparseQBuilder q_builder(&f_tensor, h_coeff, N);
-    sparse_matrix_t q_matrix = q_builder.get_matrix();
+    sparse_matrix_t q_matrix = q_builder.GetMatrix();
     timer.stop();
     meter.tick();
 

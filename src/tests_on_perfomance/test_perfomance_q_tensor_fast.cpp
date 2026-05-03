@@ -25,13 +25,13 @@ int main(int argc, char* argv[]) {
 
     // Вычисляем коэффициенты h
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
-    auto f_tensor = GenerateTensorF<0>(N);
+    auto f_tensor = GenerateTensorF(N, false);
 
     RAMMeter meter;
     Timer timer;
 
     std::vector<std::pair<std::tuple<int, int>, double>> q_matrix =
-        GenerateCOOMatrixQ<2>(&f_tensor, h_coeff, N);
+        GenerateCOOMatrixQ(&f_tensor, h_coeff);
 
     timer.stop();
     meter.tick();

@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
 
     // Вычисляем коэффициенты h
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
-    auto f_tensor = GenerateTensorF<0>(N);
+    auto f_tensor = GenerateTensorF(N, false);
 
     // Общее количество элементов
     size_t total_elements = M * M * M;

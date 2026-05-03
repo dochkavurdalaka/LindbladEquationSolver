@@ -34,7 +34,7 @@ int main() {
         elem = Conjugate(elem);
     }
 
-    auto f_tensor = GenerateTensorF<0>(N);
+    auto f_tensor = GenerateTensorF(N);
 
     size_t total_elements = M * M * M;
     double* f_tensor_nonsparse = (double*)mkl_malloc(total_elements * sizeof(double), 64);

@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
     RAMMeter meter;
     Timer timer;
     SparseRBuilder r_builder(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
-    sparse_matrix_t r_matrix = r_builder.get_matrix();
+    sparse_matrix_t r_matrix = r_builder.GetMatrix();
     timer.stop();
     meter.tick();
 

@@ -11,17 +11,6 @@
 #include "matrix_decomposition.h"
 #include "timer.h"
 
-double Check(double* first, double* second, int N) {
-    double eps = 0.;
-    for (int i = 0; i < N; ++i) {
-        if (abs(first[i] - second[i]) > 1e-12) {
-            std::cout << i << "\n";
-        }
-        eps = std::max(abs(first[i] - second[i]), eps);
-    }
-    return eps;
-}
-
 int main() {
     // Параметры
     int N = 9;
@@ -41,7 +30,7 @@ int main() {
         elem = Conjugate(elem);
     }
 
-    auto f_tensor = GenerateTensorF<0>(N);
+    auto f_tensor = GenerateTensorF(N, false);
 
     // Функтор, вычисляющий матрицу Коссаковски
     auto kossakovski_func = [&l_coeff, &l_coeff_conjugate](size_t i, size_t j) {

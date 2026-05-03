@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
     RAMMeter meter;
     Timer timer("");
 
-    std::vector<std::pair<std::tuple<int, int, int>, double>> arr = GenerateTensorF<2>(N);
+    std::vector<std::pair<std::tuple<int, int, int>, double>> arr = GenerateTensorF(N, false);
 
     timer.stop();
     meter.tick();
