@@ -90,6 +90,7 @@ void RK4Step(double t, sparse_matrix_t r_matrix, const double* k_vector, const a
     // --- Шаг метода Рунге-Кутты 4-го порядка ---
 
     // k1 = f(t, v)
+    
     model->GetUpdateHCoefDimer(h_coef, t);
     q_builder->UpdateValues(*h_coef);
     CalculateFunc(M, q_matrix, r_matrix, v_in, k_vector, k1);
@@ -116,12 +117,12 @@ void RK4Step(double t, sparse_matrix_t r_matrix, const double* k_vector, const a
     }
 }
 
-template <size_t sort_ind, class Functor>
+template <class Functor>
 struct CalculateFunctionContainer {
     std::vector<double>* h_coeff;
     DimerModel<Functor>* model;
-    SparseQBuilder<sort_ind>* q_builder;
-    CalculateFunctionContainer(DimerModel<Functor>* m, SparseQBuilder<sort_ind>* q_build) : model(m), q_builder(q_build) {}
+    SparseQBuilder* q_builder;
+    CalculateFunctionContainer(DimerModel<Functor>* m, SparseQBuilder* q_build) : model(m), q_builder(q_build) {}
 };
 
 int main() {

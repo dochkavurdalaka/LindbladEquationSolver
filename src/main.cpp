@@ -140,7 +140,7 @@ void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in,
 int main() {
     // Параметры
     int N = 7;
-    int P = 2;
+    int P = 1;
     int M = N * N - 1;
 
     VSLStreamStatePtr stream;
@@ -186,7 +186,7 @@ int main() {
     auto d_tensor = GenerateTensorD(N);
     auto z_tensor = GenerateTensorZ(f_tensor, d_tensor);
 
-    auto q_matrix = GenerateCOOMatrixQ(&f_tensor, h_coeff, N);
+    auto q_matrix = GenerateCOOMatrixQ(&f_tensor, h_coeff);
 
     double* k_vector = GenerateVectorKWithFunctor(kossakovski_func, f_tensor, N);
 

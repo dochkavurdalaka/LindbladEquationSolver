@@ -102,35 +102,30 @@ void RK4Step(double t, std::vector<std::pair<std::tuple<int, int, int>, double>>
 
     // --- Шаг метода Рунге-Кутты 4-го порядка ---
 
-
     // k1 = f(t, v)
     model.FillHamiltonian(hamiltonian, t);
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
-    auto q_matrix = GenerateCOOMatrixQ<0>(f_tens, h_coeff, N);
+    auto q_matrix = GenerateCOOMatrixQ(f_tens, h_coeff, false);
     CalculateFunc(M, q_matrix, r_matrix, v_in, k_vector, k1);
-
 
     // k2 = f(t + h/2, v + h/2 * k1)
     model.FillHamiltonian(hamiltonian, t + 0.5 * dt);
     h_coeff = GetHCoef(hamiltonian, N);
-    q_matrix = GenerateCOOMatrixQ<0>(f_tens, h_coeff, N);
+    q_matrix = GenerateCOOMatrixQ(f_tens, h_coeff, false);
     AddScaled(M, v_in, k1, dt * 0.5, v_temp);
     CalculateFunc(M, q_matrix, r_matrix, v_temp, k_vector, k2);
-
 
     // k3 = f(t + h/2, v + h/2 * k2)
     // q_matrix никак не изменился с прошлого подсчета
     AddScaled(M, v_in, k2, dt * 0.5, v_temp);
     CalculateFunc(M, q_matrix, r_matrix, v_temp, k_vector, k3);
 
-
     // k4 = f(t + h, v + h * k3)
     model.FillHamiltonian(hamiltonian, t + dt);
     h_coeff = GetHCoef(hamiltonian, N);
-    q_matrix = GenerateCOOMatrixQ<0>(f_tens, h_coeff, N);
+    q_matrix = GenerateCOOMatrixQ(f_tens, h_coeff, false);
     AddScaled(M, v_in, k3, dt, v_temp);
     CalculateFunc(M, q_matrix, r_matrix, v_temp, k_vector, k4);
-
 
     // v_out = v_in + dt/6 * (k1 + 2k2 + 2k3 + k4)
     for (size_t k = 0; k < M; ++k) {
@@ -162,7 +157,6 @@ int main() {
     MKL_Complex16* hamiltonian = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
     MKL_Complex16* lindbladian = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);
     model.FillLindbladian(lindbladian);
-
 
     std::vector<MKL_Complex16> l_coeff = GetLCoef(lindbladian, N);
     std::vector<MKL_Complex16> l_coeff_conjugate(l_coeff);
@@ -197,7 +191,15 @@ int main() {
     double* v = GetVCoef(rho, N);
     double* v_next = (double*)mkl_malloc(M * sizeof(double), 64);
 
-    CountSortTensorSN(&f_tensor, N);
+    auto cmp = [](const std::pair<std::tuple<int, int, int>, double>& left,
+                  const std::pair<std::tuple<int, int, int>, double>& right) {
+        if (std::get<2>(left.first) == std::get<2>(right.first)) {
+            return std::get<1>(left.first) < std::get<1>(right.first);
+        }
+        return std::get<2>(left.first) < std::get<2>(right.first);
+    };
+    std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+
     while (t < t_end + h / 2) {
         RK4Step(t, &f_tensor, hamiltonian, model, r_matrix, k_vector, h, v, v_next, package);
 

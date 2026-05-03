@@ -19,32 +19,35 @@ void print_vector(const char* name, double t, const double* v, int M) {
 }
 
 // "Быстрая" версия функции, которая раскладывают матрицу плотности по базису SU(N)
-void SUBasisDecompose(MKL_Complex16* matrix, int N, std::vector<double>* res) {
+void SUBasisDecompose(MKL_Complex16* matrix, size_t N, std::vector<double>* res) {
     auto& result = *res;
     result.clear();
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-            int index = j * N + k;
+    for (size_t j = 0; j < N; ++j) {
+        for (size_t k = j + 1; k < N; ++k) {
+            size_t index = j * N + k;
             result.push_back(sqrt(2.) * matrix[index].real);
         }
     }
 
-    for (int j = 0; j < N; ++j) {
-        for (int k = j + 1; k < N; ++k) {
-            int index = k * N + j;
+    for (size_t j = 0; j < N; ++j) {
+        for (size_t k = j + 1; k < N; ++k) {
+            size_t index = k * N + j;
             result.push_back(sqrt(2.) * matrix[index].imag);
         }
     }
 
-    for (int l = 0; l < N - 1; ++l) {
-        double coeff = 0.;
+    std::vector<double> matrix_diag_prefixsum(N);
+    for (size_t k = 0; k < N; ++k) {
+        matrix_diag_prefixsum[k] = matrix[k * N + k].real;
+    }
+    for (size_t k = 1; k < N; ++k) {
+        matrix_diag_prefixsum[k] += matrix_diag_prefixsum[k - 1];
+    }
 
-        for (int k = 0; k < l + 1; ++k) {
-            int index = k * N + k;
-            coeff += matrix[index].real / sqrt((l + 1) * (l + 2));
-        }
 
-        int index = (l + 1) * N + (l + 1);
+    for (size_t l = 0; l + 1 < N; ++l) {
+        double coeff = matrix_diag_prefixsum[l] / sqrt((l + 1) * (l + 2));
+        size_t index = (l + 1) * N + (l + 1);
         coeff += -sqrt(l + 1) * matrix[index].real / sqrt(l + 2);
 
         result.push_back(coeff);
@@ -282,7 +285,7 @@ void print_mat(int N, const MKL_Complex16* A, const char* name) {
 int main() {
     // Параметры
     int N = 7;
-    int P = 2;
+    int P = 1;
 
     Package package(N);
 
