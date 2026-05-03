@@ -20,10 +20,13 @@ struct DimerModel {
 
     double gamma = 0.1;
     int N;
-    explicit DimerModel(Functor f, int N) : theta(std::move(f)), N(N) {
+    mutable std::vector<double> hamiltonian_diag;
+    mutable std::vector<double> hamiltonian_diag_prefixsum;
+    explicit DimerModel(Functor f, int N)
+        : theta(std::move(f)), N(N), hamiltonian_diag(N), hamiltonian_diag_prefixsum(N - 1) {
     }
 
-    std::vector<double> GetBaseHCoefDimer(double t) {
+    std::vector<double> GetBaseHCoefDimer(double t) const {
         std::vector<double> h_coeff(N * N - 1, 0);
 
         for (int n = 0; n + 1 < N; ++n) {
@@ -31,53 +34,53 @@ struct DimerModel {
             h_coeff[index] = -J * sqrt(2. * (n + 1) * (N - 1 - n));
         }
 
-        std::vector<double> hamiltonian_diag(N, 0);
         for (int n = 0; n < N; ++n) {
             hamiltonian_diag[n] = (2.0 * U / (N - 1)) * (n * (n - 1) + (N - 1 - n) * (N - 2 - n));
             hamiltonian_diag[n] += (E + A * theta(t)) * (N - 1 - 2 * n);
         }
 
+        for (int k = 0; k + 1 < N; ++k) {
+            hamiltonian_diag_prefixsum[k] = hamiltonian_diag[k];
+        }
+        for (int k = 1; k + 1 < N; ++k) {
+            hamiltonian_diag_prefixsum[k] += hamiltonian_diag_prefixsum[k - 1];
+        }
+
         for (int l = 0; l < N - 1; ++l) {
-            double coeff = 0.;
-
-            for (int k = 0; k < l + 1; ++k) {
-                coeff += hamiltonian_diag[k] / sqrt((l + 1) * (l + 2));
-            }
-
+            double coeff = hamiltonian_diag_prefixsum[l] / sqrt((l + 1) * (l + 2));
             coeff += -sqrt(l + 1) * hamiltonian_diag[l + 1] / sqrt(l + 2);
-
             h_coeff[N * (N - 1) + l] = coeff;
         }
 
         return h_coeff;
     }
 
-    void GetUpdateHCoefDimer(std::vector<double>* h, double t) {
+    void GetUpdateHCoefDimer(std::vector<double>* h, double t) const {
 
         std::fill(h->begin() + N * (N - 1), h->end(), 0);
 
         auto& h_coeff = *h;
 
-        std::vector<double> hamiltonian_diag(N, 0);
         for (int n = 0; n < N; ++n) {
             hamiltonian_diag[n] = (2.0 * U / (N - 1)) * (n * (n - 1) + (N - 1 - n) * (N - 2 - n));
             hamiltonian_diag[n] += (E + A * theta(t)) * (N - 1 - 2 * n);
         }
 
+        for (int k = 0; k + 1 < N; ++k) {
+            hamiltonian_diag_prefixsum[k] = hamiltonian_diag[k];
+        }
+        for (int k = 1; k + 1 < N; ++k) {
+            hamiltonian_diag_prefixsum[k] += hamiltonian_diag_prefixsum[k - 1];
+        }
+
         for (int l = 0; l < N - 1; ++l) {
-            double coeff = 0.;
-
-            for (int k = 0; k < l + 1; ++k) {
-                coeff += hamiltonian_diag[k] / sqrt((l + 1) * (l + 2));
-            }
-
+            double coeff = hamiltonian_diag_prefixsum[l] / sqrt((l + 1) * (l + 2));
             coeff += -sqrt(l + 1) * hamiltonian_diag[l + 1] / sqrt(l + 2);
-
             h_coeff[N * (N - 1) + l] = coeff;
         }
     }
 
-    std::vector<MKL_Complex16> GetLCoefDimer() {
+    std::vector<MKL_Complex16> GetLCoefDimer() const {
         double mult_coeff = sqrt(gamma / (N - 1));
         std::vector<MKL_Complex16> l_coeff(N * N - 1, {0, 0});
         for (int n = 0; n + 1 < N; ++n) {
@@ -86,16 +89,42 @@ struct DimerModel {
         }
         return l_coeff;
     }
+
+    void FillHamiltonian(MKL_Complex16* hamiltonian, double t) const {
+        memset(hamiltonian, 0, N * N * sizeof(MKL_Complex16));
+        for (int n = 0; n < N; ++n) {
+            int index = n * N + n;
+            hamiltonian[index].real =
+                (2.0 * U / (N - 1)) * (n * (n - 1) + (N - 1 - n) * (N - 2 - n));
+            hamiltonian[index].real += (E + A * theta(t)) * (N - 1 - 2 * n);
+        }
+
+        for (int n = 0; n < N - 1; ++n) {
+            int index1 = n * N + n + 1;
+            int index2 = (n + 1) * N + n;
+            hamiltonian[index1].real = hamiltonian[index2].real = -J * sqrt((n + 1) * (N - 1 - n));
+        }
+    }
+
+    void FillLindbladian(MKL_Complex16* lindbladian) const {
+        memset(lindbladian, 0, N * N * sizeof(MKL_Complex16));
+        double mult_coeff = sqrt(gamma / (N - 1));
+        for (int n = 0; n < N - 1; ++n) {
+            int index1 = n * N + n + 1;
+            int index2 = (n + 1) * N + n;
+            lindbladian[index1].real = lindbladian[index2].real =
+                mult_coeff * sqrt((n + 1) * (N - 1 - n));
+        }
+    }
 };
 
-template <size_t sort_ind = 1>
 struct SparseQBuilder {
     SparseQBuilder(std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tensor,
-                   const std::vector<double>& h_coeff, int N);
+                   const std::vector<double>& h_coeff, int N, bool need_sort = true);
 
-    void update_values(const std::vector<double>& h_coeff);
+    void UpdateValues(const std::vector<double>& h_coeff);
 
-    sparse_matrix_t get_matrix() {
+    sparse_matrix_t GetMatrix() const {
         return q_;
     }
 
@@ -125,10 +154,8 @@ private:
     sparse_matrix_t q_;
 };
 
-template <size_t sort_ind>
-SparseQBuilder<sort_ind>::SparseQBuilder(
-    std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tensor,
-    const std::vector<double>& h_coeff, int N) {
+SparseQBuilder::SparseQBuilder(std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tensor,
+                               const std::vector<double>& h_coeff, int N, bool need_sort) {
 
     check_non_zero_hcoeff_.resize(N * N - 1, false);
     for (int n = 0; n + 1 < N; ++n) {
@@ -149,11 +176,9 @@ SparseQBuilder<sort_ind>::SparseQBuilder(
         return std::get<2>(left.first) < std::get<2>(right.first);
     };
 
-        // сортировка f_tensor по второму и третьему индексу
-    if constexpr (sort_ind == 1) {
+    // сортировка f_tensor по второму и третьему индексу
+    if (need_sort) {
         std::sort(f_tensor->begin(), f_tensor->end(), cmp);
-    } else if constexpr (sort_ind == 2) {
-        CountSortTensorSN(f_tensor, N);
     }
 
     auto& f_tensor_sorted = *f_tensor;
@@ -204,23 +229,21 @@ SparseQBuilder<sort_ind>::SparseQBuilder(
     mkl_sparse_optimize(q_);  // вызываем только один раз!
 }
 
-template <size_t sort_ind>
-void SparseQBuilder<sort_ind>::update_values(const std::vector<double>& h_coeff) {
-
+void SparseQBuilder::UpdateValues(const std::vector<double>& h_coeff) {
     std::fill(values_.begin(), values_.end(), 0);
     for (auto [value_ind, h_ind, f_tensor_value] : contributions_) {
         values_[value_ind] += h_coeff[h_ind] * f_tensor_value;
     }
 }
 
-template <size_t sort_ind_f = 1, size_t sort_ind_z = 1>
 struct SparseRBuilder {
     SparseRBuilder(const std::vector<MKL_Complex16>& l_coeff,
                    const std::vector<MKL_Complex16>& l_coeff_conjugate,
                    std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-                   std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N);
+                   std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N,
+                   bool need_sort = true);
 
-    sparse_matrix_t get_matrix() {
+    sparse_matrix_t GetMatrix() const {
         return r_;
     }
 
@@ -242,11 +265,11 @@ private:
     sparse_matrix_t r_;
 };
 
-template <size_t sort_ind_f, size_t sort_ind_z>
-SparseRBuilder<sort_ind_f, sort_ind_z>::SparseRBuilder(
+SparseRBuilder::SparseRBuilder(
     const std::vector<MKL_Complex16>& l_coeff, const std::vector<MKL_Complex16>& l_coeff_conjugate,
     std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N) {
+    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N,
+    bool need_sort) {
 
     auto& f_tensor = *f_tens;
     auto& z_tensor = *z_tens;
@@ -260,18 +283,10 @@ SparseRBuilder<sort_ind_f, sort_ind_z>::SparseRBuilder(
         return std::get<1>(left.first) < std::get<1>(right.first);
     };
 
-    // сортировка f_tensor по второму и третьему индексу
-    if constexpr (sort_ind_f == 1) {
+    // сортировка f_tensor и z_tensor по второму и третьему индексу
+    if (need_sort) {
         std::sort(f_tensor.begin(), f_tensor.end(), cmp);
-    } else if constexpr (sort_ind_f == 2) {
-        CountSortTensorNS(f_tens, N);
-    }
-
-    // сортировка z_tensor по второму и третьему индексу
-    if constexpr (sort_ind_z == 1) {
         std::sort(z_tensor.begin(), z_tensor.end(), cmp);
-    } else if constexpr (sort_ind_z == 2) {
-        CountSortTensorNS(z_tens, N);
     }
 
     std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> f_tensor_ss;

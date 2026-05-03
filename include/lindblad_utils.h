@@ -4,10 +4,9 @@
 #include <cmath>
 #include <array>
 #include <cstring>
+#include <vector>
 #include "mkl.h"
-
 #include "mkl_complex16.h"
-#include "count_sorts.h"
 
 size_t Mapping(int i, int j, int N) {
     return i * (N - 1) - (i * (i - 1)) / 2 + j - i - 1;
@@ -32,11 +31,10 @@ std::vector<std::pair<int, double>> GetDecomposeD_m(int i, int j, int) {
     return result;
 }
 
-// sort_ind = 0 -  не сортируем тензор в конце работы функции
-// sort_ind = 1 -  сортируем тензор в конце работы функции qsort
-// sort_ind = 2 -  сортируем тензор в конце работы функции count sort
-template <size_t sort_ind = 1>
-std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N) {
+// need_sort = false -  не сортируем тензор в конце работы функции
+// need_sort = true -  сортируем тензор в конце работы функции
+std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N,
+                                                                          bool need_sort = true) {
     // 1 квадрант
     // i < l
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr;
@@ -340,10 +338,8 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N)
         }
     }
 
-    if constexpr (sort_ind == 1) {
+    if (need_sort) {
         std::sort(arr.begin(), arr.end());
-    } else if constexpr (sort_ind == 2) {
-        CountSortTensor(&arr, N);
     }
 
     return arr;
@@ -374,11 +370,10 @@ std::vector<std::pair<int, double>> GetDecomposeD_p(int i, int j, int N) {
     return result;
 }
 
-// sort_ind = 0 -  не сортируем тензор в конце работы функции
-// sort_ind = 1 -  сортируем тензор в конце работы функции qsort
-// sort_ind = 2 -  сортируем тензор в конце работы функции count sort
-template <size_t sort_ind = 1>
-std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N) {
+// need_sort = false -  не сортируем тензор в конце работы функции
+// need_sort = true -  сортируем тензор в конце работы функции
+std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N,
+                                                                          bool need_sort = true) {
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr;
 
     // 1 квадрант
@@ -745,10 +740,8 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N)
         }
     }
 
-    if constexpr (sort_ind == 1) {
+    if (need_sort) {
         std::sort(arr.begin(), arr.end());
-    } else if constexpr (sort_ind == 2) {
-        CountSortTensor(&arr, N);
     }
     return arr;
 }
@@ -861,24 +854,24 @@ double* GenerateVectorKWithFunctor(
 
     for (const auto& [ind, value] : f_tensor) {
         const auto& [m, n, s] = ind;
+        k_vector[s] += -1. * (kossakovski_func(m, n) * value).imag;
+    }
 
-        k_vector[s] += -1. * (kossakovski_func(m, n) * value).imag / N;
+    for (int s = 0; s < M; ++s) {
+        k_vector[s] /= N;
     }
 
     return k_vector;
 }
 
 // в этой функции ключевым условием для правильности работы является отсортированность тензора f по
-// возрастанию (s, n) sort_ind = 0 -  не сортируем тензор в начале работы функции sort_ind = 1 -
-// сортируем тензор в начале работы функции qsort sort_ind = 2 -  сортируем тензор в начале работы
-// функции count sort
-template <size_t sort_ind = 1>
+// возрастанию (s, n)
 std::vector<std::pair<std::tuple<int, int>, double>> GenerateCOOMatrixQ(
     std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-    const std::vector<double>& h_coeff, size_t N) {
+    const std::vector<double>& h_coeff, bool need_sort = true) {
     auto& f_tensor = *f_tens;
 
-    if constexpr (sort_ind == 1) {
+    if (need_sort) {
         auto cmp = [](const std::pair<std::tuple<int, int, int>, double>& left,
                       const std::pair<std::tuple<int, int, int>, double>& right) {
             if (std::get<2>(left.first) == std::get<2>(right.first)) {
@@ -887,8 +880,6 @@ std::vector<std::pair<std::tuple<int, int>, double>> GenerateCOOMatrixQ(
             return std::get<2>(left.first) < std::get<2>(right.first);
         };
         std::sort(f_tensor.begin(), f_tensor.end(), cmp);
-    } else if constexpr (sort_ind == 2) {
-        CountSortTensorSN(f_tens, N);
     }
 
     std::vector<std::pair<std::tuple<int, int>, double>> q_matrix;
@@ -910,12 +901,11 @@ std::vector<std::pair<std::tuple<int, int>, double>> GenerateCOOMatrixQ(
     return q_matrix;
 }
 
-template <size_t sort_ind_f = 1, size_t sort_ind_z = 1>
 double* GenerateMatrixR(const std::vector<MKL_Complex16>& l_coeff,
                         const std::vector<MKL_Complex16>& l_coeff_conjugate,
                         std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
                         std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens,
-                        size_t N) {
+                        int N, bool need_sort = true) {
 
     auto& f_tensor = *f_tens;
     auto& z_tensor = *z_tens;
@@ -930,18 +920,10 @@ double* GenerateMatrixR(const std::vector<MKL_Complex16>& l_coeff,
         return std::get<1>(left.first) < std::get<1>(right.first);
     };
 
-    // сортировка f_tensor по второму и третьему индексу
-    if constexpr (sort_ind_f == 1) {
+    // сортировка f_tensor и z_tensor по второму и третьему индексу
+    if (need_sort) {
         std::sort(f_tensor.begin(), f_tensor.end(), cmp);
-    } else if constexpr (sort_ind_f == 2) {
-        CountSortTensorNS(f_tens, N);
-    }
-
-    // сортировка z_tensor по второму и третьему индексу
-    if constexpr (sort_ind_z == 1) {
         std::sort(z_tensor.begin(), z_tensor.end(), cmp);
-    } else if constexpr (sort_ind_z == 2) {
-        CountSortTensorNS(z_tens, N);
     }
 
     std::vector<std::pair<std::tuple<int, int>, std::array<MKL_Complex16, 2>>> f_tensor_ss;
@@ -1023,15 +1005,15 @@ double* GenerateMatrixR(const std::vector<MKL_Complex16>& l_coeff,
         start_f = end_f;
     }
 
+
     return r_tensor;
 }
 
-template <size_t sort_ind_f = 1, size_t sort_ind_z = 1>
-double* GenerateMatrixR(
-    const std::vector<std::vector<MKL_Complex16>>& l_coeff,
-    const std::vector<std::vector<MKL_Complex16>>& l_coeff_conjugate,
-    std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
-    std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens, int N) {
+double* GenerateMatrixR(const std::vector<std::vector<MKL_Complex16>>& l_coeff,
+                        const std::vector<std::vector<MKL_Complex16>>& l_coeff_conjugate,
+                        std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
+                        std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens,
+                        int N, bool need_sort = true) {
 
     size_t P = l_coeff.size();
 
@@ -1049,18 +1031,10 @@ double* GenerateMatrixR(
         return std::get<1>(left.first) < std::get<1>(right.first);
     };
 
-    // сортировка f_tensor по второму и третьему индексу
-    if constexpr (sort_ind_f == 1) {
+    // сортировка f_tensor и z_tensor по второму и третьему индексу
+    if (need_sort) {
         std::sort(f_tensor.begin(), f_tensor.end(), cmp);
-    } else if constexpr (sort_ind_f == 2) {
-        CountSortTensorNS(f_tens, N);
-    }
-
-    // сортировка z_tensor по второму и третьему индексу
-    if constexpr (sort_ind_z == 1) {
         std::sort(z_tensor.begin(), z_tensor.end(), cmp);
-    } else if constexpr (sort_ind_z == 2) {
-        CountSortTensorNS(z_tens, N);
     }
 
     double* r_tensor = (double*)mkl_malloc(M * M * sizeof(double), 64);
