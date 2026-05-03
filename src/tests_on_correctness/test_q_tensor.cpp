@@ -25,10 +25,10 @@ int main() {
 
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
 
-    auto f_tensor = GenerateTensorF<0>(N);
+    auto f_tensor = GenerateTensorF(N, false);
 
     std::vector<std::pair<std::tuple<int, int>, double>> q_tensor =
-        GenerateCOOMatrixQ(&f_tensor, h_coeff, N);
+        GenerateCOOMatrixQ(&f_tensor, h_coeff);
 
     // Общее количество элементов
     size_t total_elements = M * M * M;

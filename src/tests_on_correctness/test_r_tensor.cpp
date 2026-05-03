@@ -48,7 +48,7 @@ int main() {
     auto z_tensor = GenerateTensorZ(f_tensor, d_tensor);
 
 
-    double* r_tensor_fast = GenerateMatrixR<2, 2>(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
+    double* r_tensor_fast = GenerateMatrixR(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
 
     double* r_tensor_slow = (double*)mkl_malloc(M * M * sizeof(double), 64);
 
@@ -101,6 +101,7 @@ int main() {
             r_tensor_slow[s * M + n] = -0.25 * sum_jkl;
         }
     }
+
 
     std::cout << Check(r_tensor_fast, r_tensor_slow, M) << "\n";
 

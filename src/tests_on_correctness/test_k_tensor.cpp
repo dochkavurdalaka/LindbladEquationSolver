@@ -44,7 +44,7 @@ int main() {
         elem = Conjugate(elem);
     }
 
-    auto f_tensor = GenerateTensorF<0>(N);
+    auto f_tensor = GenerateTensorF(N, false);
 
     double* k_tensor = (double*)mkl_malloc(M * sizeof(double), 64);
     memset(k_tensor, 0, M * sizeof(double));
