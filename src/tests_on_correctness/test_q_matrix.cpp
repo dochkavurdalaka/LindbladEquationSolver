@@ -25,9 +25,9 @@ int main() {
 
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
 
-    auto f_tensor = GenerateTensorF(N, false);
+    auto f_tensor = GenerateTensorF(N);
 
-    std::vector<std::pair<std::tuple<int, int>, double>> q_tensor =
+    std::vector<std::pair<std::tuple<int, int>, double>> q_matrix =
         GenerateCOOMatrixQ(&f_tensor, h_coeff);
 
     // Общее количество элементов
@@ -41,39 +41,39 @@ int main() {
         f_tensor_nonsparse[index] = value;
     }
 
-    double* q_tensor_nonsparse = (double*)mkl_malloc(M * M * sizeof(double), 64);
-    memset(q_tensor_nonsparse, 0, M * M * sizeof(double));
+    double* q_matrix_nonsparse = (double*)mkl_malloc(M * M * sizeof(double), 64);
+    memset(q_matrix_nonsparse, 0, M * M * sizeof(double));
 
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < M; ++n) {
             for (int s = 0; s < M; ++s) {
                 int q_index = s * M + n;
                 int f_index = m * M * M + n * M + s;
-                q_tensor_nonsparse[q_index] += h_coeff[m] * f_tensor_nonsparse[f_index];
+                q_matrix_nonsparse[q_index] += h_coeff[m] * f_tensor_nonsparse[f_index];
             }
         }
     }
 
-    std::vector<std::pair<std::tuple<int, int>, double>> new_q_tensor;
+    std::vector<std::pair<std::tuple<int, int>, double>> new_q_matrix;
     for (int n = 0; n < M; ++n) {
         for (int s = 0; s < M; ++s) {
             int q_index = s * M + n;
-            if (q_tensor_nonsparse[q_index] != 0) {
-                new_q_tensor.emplace_back(std::tuple(s, n), q_tensor_nonsparse[q_index]);
+            if (q_matrix_nonsparse[q_index] != 0) {
+                new_q_matrix.emplace_back(std::tuple(s, n), q_matrix_nonsparse[q_index]);
             }
         }
     }
-    std::sort(new_q_tensor.begin(), new_q_tensor.end());
+    std::sort(new_q_matrix.begin(), new_q_matrix.end());
 
-    if (q_tensor.size() != new_q_tensor.size()) {
+    if (q_matrix.size() != new_q_matrix.size()) {
         std::cout << "false\n";
     }
 
     double eps = 0;
-    for (size_t i = 0; i < q_tensor.size(); ++i) {
-        eps = std::max(abs(q_tensor[i].second - new_q_tensor[i].second), eps);
-        if ((q_tensor[i].first != new_q_tensor[i].first) or
-            abs(q_tensor[i].second - new_q_tensor[i].second) > 1e-12) {
+    for (size_t i = 0; i < q_matrix.size(); ++i) {
+        eps = std::max(abs(q_matrix[i].second - new_q_matrix[i].second), eps);
+        if ((q_matrix[i].first != new_q_matrix[i].first) or
+            abs(q_matrix[i].second - new_q_matrix[i].second) > 1e-12) {
             std::cout << "false\n";
         }
     }
@@ -81,6 +81,6 @@ int main() {
 
     // Освобождение памяти
     mkl_free(f_tensor_nonsparse);
-    mkl_free(q_tensor_nonsparse);
+    mkl_free(q_matrix_nonsparse);
     mkl_free(hamiltonian);
 }

@@ -70,6 +70,12 @@ int main(int argc, char* argv[]) {
     timer.stop();
     meter.tick();
 
+
+    h_coeff[0] = -1;
+    timer.start();
+    q_builder.UpdateValues(h_coeff);
+    timer.stop();
+
     // филлерный код, чтобы компилятор не выкинул вышенаписанный код ничего
     print_first_element(q_matrix);
 

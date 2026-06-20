@@ -1,5 +1,8 @@
 #include <iostream>
 #include <vector>
+#include <cmath>
+#include <iomanip>
+#include <cstring>
 
 #include "mkl.h"
 #include "generate_matrices.h"
@@ -8,13 +11,9 @@
 #include "matrix_decomposition.h"
 #include "timer.h"
 
-int main(int argc, char* argv[]) {
+int main() {
     // Параметры
-    int N = 50;
-    // на случай если передаем размер N в параметрах командной строки
-    if (argc == 2) {
-        N = std::atoi(argv[1]);
-    }
+    int N = 9;
 
     // Cоздаем линдбладиан
     VSLStreamStatePtr stream;
@@ -32,20 +31,20 @@ int main(int argc, char* argv[]) {
     }
 
     auto f_tensor = GenerateTensorF(N);
-    auto d_tensor = GenerateTensorD(N);
-    auto z_tensor = GenerateTensorZ(f_tensor, d_tensor);
+
+    // Функтор, вычисляющий матрицу Коссаковски
+    auto kossakovski_func = [&l_coeff, &l_coeff_conjugate](size_t i, size_t j) {
+        return l_coeff[i] * l_coeff_conjugate[j];
+    };
 
     RAMMeter meter;
     Timer timer;
-
-    double* r_tensor = GenerateMatrixR(l_coeff, l_coeff_conjugate, &f_tensor, &z_tensor, N);
-
+    double* k_vector = GenerateVectorKWithFunctor(kossakovski_func, f_tensor, N);
     timer.stop();
     meter.tick();
-    // филлерный код, чтобы компилятор не выкинул вышенаписанный код
-    std::cout << r_tensor[0];
-    
+
+    // Освобождение памяти
+    mkl_free(k_vector);
     mkl_free(lindbladian);
-    mkl_free(r_tensor);
     return 0;
 }

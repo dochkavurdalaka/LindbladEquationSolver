@@ -31,10 +31,7 @@ std::vector<std::pair<int, double>> GetDecomposeD_m(int i, int j, int) {
     return result;
 }
 
-// need_sort = false -  не сортируем тензор в конце работы функции
-// need_sort = true -  сортируем тензор в конце работы функции
-std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N,
-                                                                          bool need_sort = true) {
+std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N) {
     // 1 квадрант
     // i < l
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr;
@@ -338,10 +335,6 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorF(int N,
         }
     }
 
-    if (need_sort) {
-        std::sort(arr.begin(), arr.end());
-    }
-
     return arr;
 }
 
@@ -370,10 +363,7 @@ std::vector<std::pair<int, double>> GetDecomposeD_p(int i, int j, int N) {
     return result;
 }
 
-// need_sort = false -  не сортируем тензор в конце работы функции
-// need_sort = true -  сортируем тензор в конце работы функции
-std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N,
-                                                                          bool need_sort = true) {
+std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N) {
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr;
 
     // 1 квадрант
@@ -740,9 +730,6 @@ std::vector<std::pair<std::tuple<int, int, int>, double>> GenerateTensorD(int N,
         }
     }
 
-    if (need_sort) {
-        std::sort(arr.begin(), arr.end());
-    }
     return arr;
 }
 
@@ -751,34 +738,14 @@ std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> GenerateTensorZ
     const std::vector<std::pair<std::tuple<int, int, int>, double>>& f_tensor,
     const std::vector<std::pair<std::tuple<int, int, int>, double>>& d_tensor) {
     std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>> z_tensor;
-    z_tensor.reserve(f_tensor.size());
+    z_tensor.reserve(f_tensor.size() + d_tensor.size());
 
-    size_t i = 0;
-    size_t j = 0;
-
-    while (i < f_tensor.size() and j < d_tensor.size()) {
-        if (f_tensor[i] < d_tensor[j]) {
-            z_tensor.emplace_back(f_tensor[i].first, MKL_Complex16{f_tensor[i].second, 0});
-            i += 1;
-        } else if (f_tensor[i] > d_tensor[j]) {
-            z_tensor.emplace_back(d_tensor[j].first, MKL_Complex16{0, d_tensor[j].second});
-            j += 1;
-        } else {
-            z_tensor.emplace_back(f_tensor[i].first,
-                                  MKL_Complex16{f_tensor[i].second, d_tensor[j].second});
-            i += 1;
-            j += 1;
-        }
-    }
-
-    while (i < f_tensor.size()) {
+    for (size_t i = 0; i < f_tensor.size(); ++i) {
         z_tensor.emplace_back(f_tensor[i].first, MKL_Complex16{f_tensor[i].second, 0});
-        i += 1;
     }
 
-    while (j < d_tensor.size()) {
-        z_tensor.emplace_back(d_tensor[j].first, MKL_Complex16{0, d_tensor[j].second});
-        j += 1;
+    for (size_t i = 0; i < d_tensor.size(); ++i) {
+        z_tensor.emplace_back(d_tensor[i].first, MKL_Complex16{0, d_tensor[i].second});
     }
 
     return z_tensor;
@@ -1005,9 +972,9 @@ double* GenerateMatrixR(const std::vector<MKL_Complex16>& l_coeff,
         start_f = end_f;
     }
 
-
     return r_tensor;
 }
+
 
 double* GenerateMatrixR(const std::vector<std::vector<MKL_Complex16>>& l_coeff,
                         const std::vector<std::vector<MKL_Complex16>>& l_coeff_conjugate,
@@ -1123,6 +1090,81 @@ double* GenerateMatrixR(const std::vector<std::vector<MKL_Complex16>>& l_coeff,
         f_tensor_ss.clear();
         z_tensor_ss.clear();
     }
+
+    return r_tensor;
+}
+
+
+// вычисление R через матрицу Коссаковски
+// будет накапливаться большая численная погрешность
+// не надо так делать
+double* GenerateMatrixR(auto kossakovski_func,
+                        std::vector<std::pair<std::tuple<int, int, int>, double>>* f_tens,
+                        std::vector<std::pair<std::tuple<int, int, int>, MKL_Complex16>>* z_tens,
+                        int N, bool need_sort = true) {
+
+    auto& f_tensor = *f_tens;
+    auto& z_tensor = *z_tens;
+
+    int M = N * N - 1;
+
+    auto cmp = []<typename T>(const std::pair<std::tuple<int, int, int>, T>& left,
+                              const std::pair<std::tuple<int, int, int>, T>& right) {
+        return std::get<1>(left.first) < std::get<1>(right.first);
+    };
+
+    // сортировка f_tensor и z_tensor по второму и третьему индексу
+    if (need_sort) {
+        std::sort(f_tensor.begin(), f_tensor.end(), cmp);
+        std::sort(z_tensor.begin(), z_tensor.end(), cmp);
+    }
+
+    double* r_tensor = (double*)mkl_malloc(M * M * sizeof(double), 64);
+
+    memset(r_tensor, 0, M * M * sizeof(double));
+
+    // Добавляем страж-элемент для упрощения проверки границ в циклах while
+    // Чтобы ниже в циклах не проверять end_z < z_tensor_ss.size() и end_f < f_tensor_ss.size()
+    z_tensor.emplace_back(std::tuple(0, M, 0), MKL_Complex16{0, 0});
+    f_tensor.emplace_back(std::tuple(0, M, 0), 0);
+
+    size_t start_z = 0;
+    size_t start_f = 0;
+    for (int l = 0; l < M; ++l) {
+        size_t end_z = start_z;
+        size_t end_f = start_f;
+
+        while (std::get<1>(z_tensor[end_z].first) == l) {
+            ++end_z;
+        }
+
+        while (std::get<1>(f_tensor[end_f].first) == l) {
+            ++end_f;
+        }
+
+        for (size_t i_cnt = start_z; i_cnt < end_z; ++i_cnt) {
+            for (size_t j_cnt = start_f; j_cnt < end_f; ++j_cnt) {
+
+                int s = std::get<2>(f_tensor[j_cnt].first);
+                int n = std::get<2>(z_tensor[i_cnt].first);
+
+                int j = std::get<0>(z_tensor[i_cnt].first);
+                int k = std::get<0>(f_tensor[j_cnt].first);
+
+                r_tensor[s * M + n] += -0.25 * (kossakovski_func(j, k) * f_tensor[j_cnt].second *
+                                                    z_tensor[i_cnt].second +
+                                                kossakovski_func(k, j) * f_tensor[j_cnt].second *
+                                                    Conjugate(z_tensor[i_cnt].second))
+                                                   .real;
+            }
+        }
+
+        start_z = end_z;
+        start_f = end_f;
+    }
+
+    f_tensor.pop_back();
+    z_tensor.pop_back();
 
     return r_tensor;
 }

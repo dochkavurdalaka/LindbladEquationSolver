@@ -9,6 +9,7 @@
 #include "mkl_complex16.h"
 #include "lindblad_utils.h"
 #include "matrix_decomposition.h"
+#include "timer.h"
 
 // здесь и далее решаем систему для константного H
 // тогда матрица Q тоже будет константной
@@ -137,10 +138,14 @@ void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in,
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     // Параметры
-    int N = 7;
-    int P = 2;
+    int N = 20;
+    if (argc == 2) {
+        N = std::atoi(argv[1]);
+    }
+
+    int P = 1;
     int M = N * N - 1;
 
     VSLStreamStatePtr stream;
@@ -152,6 +157,8 @@ int main() {
         lindbladians[i] = GenerateLp(N, stream);
     }
 
+    RAMMeter meter;
+    Timer timer;
     MKL_Complex16* rho = GenerateDensity(N, stream);
     vslDeleteStream(&stream);
 
@@ -201,7 +208,7 @@ int main() {
 
     // Параметры
     double t_end = 1.0;
-    double h = 0.01;
+    double h = 0.0001;
     double eps_gr = 1e-7;
 
     double t = t0;
@@ -227,8 +234,6 @@ int main() {
         // swap rho and rho_next
         std::swap(v, v_next);
 
-        print_vector("v", t + h, v, M);
-
         t += h;
     }
 
@@ -236,13 +241,16 @@ int main() {
         RK4Step(N, s_matrix, k_vector, t_end - t, v, v_next, package);
         // swap rho and rho_next
         std::swap(v, v_next);
-        print_vector("v", t_end, v, M);
     }
 
 
 
     MKL_Complex16* rho_final = GetDensityBySUDecomposition(v, N);
-    // print_mat(N, rho_final, "rho");
+
+    timer.stop();
+    meter.tick();
+    
+    std::cout << rho_final[0].real << "\n";
 
     mkl_free(rho_final);
     mkl_free(hamiltonian);

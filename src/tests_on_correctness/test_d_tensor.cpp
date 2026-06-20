@@ -376,6 +376,7 @@ int main() {
 
     FillAntiCommutator(&anticommutator, N);
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr = GenerateTensorD(N);
+    std::sort(arr.begin(), arr.end());
 
     std::vector<std::pair<std::tuple<int, int, int>, double>> new_arr;
     MKL_Complex16* end_result = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);

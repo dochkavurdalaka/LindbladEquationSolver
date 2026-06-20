@@ -49,8 +49,8 @@ int main() {
     RAMMeter meter;
     Timer timer;
 
-    double* k_tensor = (double*)mkl_malloc(M * sizeof(double), 64);
-    memset(k_tensor, 0, M * sizeof(double));
+    double* k_vector = (double*)mkl_malloc(M * sizeof(double), 64);
+    memset(k_vector, 0, M * sizeof(double));
 
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < M; ++n) {
@@ -58,20 +58,20 @@ int main() {
             MKL_Complex16 a_mn = l_coeff[m] * l_coeff_conjugate[n];
             for (int s = 0; s < M; ++s) {
                 int f_index = m * M * M + n * M + s;
-                k_tensor[s] += (a_mn * f_tensor_nonsparse[f_index]).imag;
+                k_vector[s] += (a_mn * f_tensor_nonsparse[f_index]).imag;
             }
         }
     }
 
     for (int s = 0; s < M; ++s) {
-        k_tensor[s] *= -1. / N;
+        k_vector[s] *= -1. / N;
     }
 
     timer.stop();
     meter.tick();
 
     // Освобождение памяти
-    mkl_free(k_tensor);
+    mkl_free(k_vector);
     mkl_free(f_tensor_nonsparse);
     mkl_free(lindbladian);
     return 0;

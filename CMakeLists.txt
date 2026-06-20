@@ -8,8 +8,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Включаем папку include для всех таргетов
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-
+# ЗДЕСЬ ВЫБИРАЕМ КАКИЕ ФАЙЛЫ СОБРАТЬ
 file(GLOB TEST_SOURCES "src/*.cpp")
+# file(GLOB TEST_SOURCES "src/tests_on_correctness/*.cpp")
+# file(GLOB TEST_SOURCES "src/tests_on_perfomance/*.cpp")
 
 # Преобразуем пути в имена программ
 set(PROGRAMS "")
@@ -25,7 +27,7 @@ endforeach()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Поиск OpenMP
-find_package(OpenMP REQUIRED)
+#find_package(OpenMP REQUIRED)
 
 
 # find_package(MKLParallel REQUIRED)
@@ -92,7 +94,8 @@ foreach(program IN LISTS PROGRAMS)
     
     # Конфигурационные флаги для Release (отдельные флаги)
     target_compile_options(${program} PRIVATE
-        $<$<CONFIG:Release>:-O2>
+        #$<$<CONFIG:Release>:-O2>
+        $<$<CONFIG:Release>:-O3>
         $<$<CONFIG:Release>:-march=native>
     )
 
@@ -109,7 +112,7 @@ foreach(program IN LISTS PROGRAMS)
     # Связывание с MKL и OpenMP
     target_link_libraries(${program} 
         ${MKL_TARGET}
-        OpenMP::OpenMP_CXX
+        #OpenMP::OpenMP_CXX
     )
     
     # Организация выходных файлов

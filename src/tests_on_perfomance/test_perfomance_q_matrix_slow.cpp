@@ -27,12 +27,14 @@ void print_vector(const char* name, double t, const double* v, int M) {
 
 int main(int argc, char* argv[]) {
     // Параметры
-    int N = 20;
-    size_t M = N * N - 1;
+    int N = 30;
+    
     // на случай если передаем размер N в параметрах командной строки
     if (argc == 2) {
         N = std::atoi(argv[1]);
     }
+
+    size_t M = N * N - 1;
 
     // Cоздаем гамильтониан
     VSLStreamStatePtr stream;
@@ -43,7 +45,7 @@ int main(int argc, char* argv[]) {
 
     // Вычисляем коэффициенты h
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
-    auto f_tensor = GenerateTensorF(N, false);
+    auto f_tensor = GenerateTensorF(N);
 
     // Общее количество элементов
     size_t total_elements = M * M * M;
@@ -64,10 +66,10 @@ int main(int argc, char* argv[]) {
     RAMMeter meter;
     Timer timer;
 
-    double* q_tensor_sparse = (double*)mkl_malloc(M * M * sizeof(double), 64);
-    memset(q_tensor_sparse, 0, M * M * sizeof(double));
+    double* q_matrix_sparse = (double*)mkl_malloc(M * M * sizeof(double), 64);
+    memset(q_matrix_sparse, 0, M * M * sizeof(double));
 
-    if (q_tensor_sparse == NULL) {
+    if (q_matrix_sparse == NULL) {
         std::cout << "not enough memory for allocation tensor q";
         return 0;
     }
@@ -77,7 +79,7 @@ int main(int argc, char* argv[]) {
             for (size_t s = 0; s < M; ++s) {
                 size_t q_index = s * M + n;
                 size_t f_index = m * M * M + n * M + s;
-                q_tensor_sparse[q_index] += h_coeff[m] * f_tensor_sparse[f_index];
+                q_matrix_sparse[q_index] += h_coeff[m] * f_tensor_sparse[f_index];
             }
         }
     }
@@ -86,10 +88,10 @@ int main(int argc, char* argv[]) {
     meter.tick();
 
 
-    std::cout << q_tensor_sparse[0]<< "\n";
+    std::cout << q_matrix_sparse[0]<< "\n";
 
     // Освобождение памяти
     mkl_free(hamiltonian);
     mkl_free(f_tensor_sparse);
-    mkl_free(q_tensor_sparse);
+    mkl_free(q_matrix_sparse);
 }

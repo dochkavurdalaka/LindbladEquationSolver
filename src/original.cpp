@@ -213,7 +213,7 @@ void RK4Step(int N, double* s_matrix, double* k_vector, double dt, double* v_in,
 int main() {
     // Параметры
     int N = 7;
-    int P = 1;
+    int P = 2;
     size_t M = N * N - 1;
 
     VSLStreamStatePtr stream;

@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
 
     // Вычисляем коэффициенты h
     std::vector<double> h_coeff = GetHCoef(hamiltonian, N);
-    auto f_tensor = GenerateTensorF(N, false);
+    auto f_tensor = GenerateTensorF(N);
 
     RAMMeter meter;
     Timer timer;

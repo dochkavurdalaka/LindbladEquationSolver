@@ -294,6 +294,7 @@ int main() {
 
 
     std::vector<std::pair<std::tuple<int, int, int>, double>> arr = GenerateTensorF(N);
+    std::sort(arr.begin(), arr.end());
 
     std::vector<std::pair<std::tuple<int, int, int>, double>> new_arr;
 

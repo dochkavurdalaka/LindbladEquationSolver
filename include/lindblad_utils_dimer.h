@@ -335,9 +335,9 @@ SparseRBuilder::SparseRBuilder(
 
     int M = N * N - 1;
     std::vector<std::unordered_map<int, double>> r_sparse(M);
-    for (int i = 0; i < M; ++i) {
-        r_sparse[i].reserve(N);
-    }
+    // for (int i = 0; i < M; ++i) {
+    //     r_sparse[i].reserve(32);
+    // }
 
     // Добавляем страж-элемент для упрощения проверки границ в циклах while
     // Чтобы ниже в циклах не проверять end_z < z_tensor_ss.size() и end_f < f_tensor_ss.size()

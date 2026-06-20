@@ -11,11 +11,11 @@
 int main(int argc, char* argv[]) {
     // Параметры
     int N = 10;
-    int M = N * N - 1;
     // на случай если передаем размер N в параметрах командной строки
     if (argc == 2) {
         N = std::atoi(argv[1]);
     }
+    int M = N * N - 1;
     RAMMeter meter;
     Timer timer;
     MKL_Complex16* end_result = (MKL_Complex16*)mkl_malloc(N * N * sizeof(MKL_Complex16), 64);

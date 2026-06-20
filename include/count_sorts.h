@@ -20,7 +20,7 @@ void CountSortTensor(std::vector<std::pair<std::tuple<int, int, int>, NumberType
 
     std::vector<std::pair<std::tuple<int, int, int>, double>> temp_tensor(tensor.size());
     // Распределение в обратном порядке для stable сортировки
-    for (int i = tensor.size() - 1; i >= 0; i--) {
+    for (ptrdiff_t i = tensor.size() - 1; i >= 0; i--) {
         const auto& item = tensor[i];
         int pos = --count[std::get<2>(item.first)];
         temp_tensor[pos] = tensor[i];
@@ -36,7 +36,7 @@ void CountSortTensor(std::vector<std::pair<std::tuple<int, int, int>, NumberType
         count[i] += count[i - 1];
     }
 
-    for (int i = temp_tensor.size() - 1; i >= 0; i--) {
+    for (ptrdiff_t i = temp_tensor.size() - 1; i >= 0; i--) {
         const auto& item = temp_tensor[i];
         int pos = --count[std::get<1>(item.first)];
         tensor[pos] = temp_tensor[i];
@@ -52,7 +52,7 @@ void CountSortTensor(std::vector<std::pair<std::tuple<int, int, int>, NumberType
         count[i] += count[i - 1];
     }
 
-    for (int i = temp_tensor.size() - 1; i >= 0; i--) {
+    for (ptrdiff_t i = temp_tensor.size() - 1; i >= 0; i--) {
         const auto& item = tensor[i];
         int pos = --count[std::get<0>(item.first)];
         temp_tensor[pos] = item;
@@ -76,7 +76,7 @@ void CountSortTensorSN(std::vector<std::pair<std::tuple<int, int, int>, double>>
 
     std::vector<std::pair<std::tuple<int, int, int>, double>> temp_tensor(tensor.size());
     // Распределение в обратном порядке для stable сортировки
-    for (int i = tensor.size() - 1; i >= 0; i--) {
+    for (ptrdiff_t i = tensor.size() - 1; i >= 0; i--) {
         const auto& item = tensor[i];
         int pos = --count[std::get<1>(item.first)];
         temp_tensor[pos] = tensor[i];
@@ -92,7 +92,7 @@ void CountSortTensorSN(std::vector<std::pair<std::tuple<int, int, int>, double>>
         count[i] += count[i - 1];
     }
 
-    for (int i = temp_tensor.size() - 1; i >= 0; i--) {
+    for (ptrdiff_t i = temp_tensor.size() - 1; i >= 0; i--) {
         const auto& item = temp_tensor[i];
         int pos = --count[std::get<2>(item.first)];
         tensor[pos] = temp_tensor[i];
@@ -116,7 +116,7 @@ void CountSortTensorNS(std::vector<std::pair<std::tuple<int, int, int>, NumberTy
 
     std::vector<std::pair<std::tuple<int, int, int>, NumberType>> temp_tensor(tensor.size());
     // Распределение в обратном порядке для stable сортировки
-    for (int i = tensor.size() - 1; i >= 0; i--) {
+    for (ptrdiff_t i = tensor.size() - 1; i >= 0; i--) {
         const auto& item = tensor[i];
         int pos = --count[std::get<2>(item.first)];
         temp_tensor[pos] = tensor[i];
@@ -132,7 +132,7 @@ void CountSortTensorNS(std::vector<std::pair<std::tuple<int, int, int>, NumberTy
         count[i] += count[i - 1];
     }
 
-    for (int i = temp_tensor.size() - 1; i >= 0; i--) {
+    for (ptrdiff_t i = temp_tensor.size() - 1; i >= 0; i--) {
         const auto& item = temp_tensor[i];
         int pos = --count[std::get<1>(item.first)];
         tensor[pos] = temp_tensor[i];
