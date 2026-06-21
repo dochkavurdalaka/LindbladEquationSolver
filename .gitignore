@@ -1,4 +1,0 @@
-build/
-.vscode/launch.json
-src/tests_on_perfomance/test_perfomance_sort.cpp
-main_RK_control.cpp
