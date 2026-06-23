@@ -264,7 +264,7 @@ file(GLOB TEST_SOURCES "src/tests_on_perfomance/*.cpp")
 3. Загрузите тензорные данные:
    - Получите их самостоятельно при помощи `tensor_to_file.cpp`, или
    - Используйте [готовые данные для визуализации](https://drive.google.com/drive/folders/1wIU8KR7qGAcoxAfSmJVUp4PPuUdGwkQp?usp=sharing)
-4. Выполните нужные ячейки последовательно для генерации визуализаций
+4. Выполните нужные ячейки для генерации визуализаций
 
 
 ## 📊 Презентация диплома
