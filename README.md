@@ -252,7 +252,7 @@ file(GLOB TEST_SOURCES "src/tests_on_perfomance/*.cpp")
 
 Инструмент для трехмерной визуализации тензоров доступен по ссылке:
 
-[🔗 3D визуализация тензора в Colab](https://colab.research.google.com/drive/1FTh4LZ3JKQbIyVajnqfzSySQlPVTKPjP?usp=sharing)
+[🔗 3D визуализация тензора в Colab](https://colab.research.google.com/drive/13mFdPC_4MkAMIwmBcTuu3A1HPfekJbZT?usp=sharing)
 
 > ⚠️ **Важно:** 3D-визуализация требует значительного времени для загрузки, так как в файле много анимаций, и он весит примерно **180 МБ**. Пожалуйста, наберитесь терпения при первом запуске — это нормально. 
 
